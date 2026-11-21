@@ -1,0 +1,125 @@
+#!/bin/sh
+# exalib: install compiled optimization model libraries (cnlp ABI) from the exalib registry.
+#
+#   exalib list               available libraries for this platform, and what is installed
+#   exalib install NAME...    install or update libraries into $EXALIB_HOME/lib/NAME
+#   exalib up                 update every installed library to the newest version
+#   exalib remove NAME...     remove installed libraries
+#   exalib path               print the library directory (for CNLPMODELS_PATH)
+#
+# Environment: EXALIB_HOME (default ~/.exalib), EXALIB_INDEX (default the published index).
+set -eu
+
+EXALIB_HOME="${EXALIB_HOME:-$HOME/.exalib}"
+EXALIB_INDEX="${EXALIB_INDEX:-https://madsuite.org/exalib/index.tsv}"
+LIBDIR="$EXALIB_HOME/lib"
+
+die() { echo "exalib: $*" >&2; exit 1; }
+
+platform() {
+    case "$(uname -s)" in
+        Linux) os=linux ;; Darwin) os=macos ;; MINGW*|MSYS*|CYGWIN*) os=windows ;;
+        *) die "unsupported operating system $(uname -s)" ;;
+    esac
+    case "$(uname -m)" in
+        x86_64|amd64) arch=x86_64 ;; aarch64|arm64) arch=aarch64 ;;
+        *) die "unsupported architecture $(uname -m)" ;;
+    esac
+    echo "$os-$arch"
+}
+
+sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
+    else die "no sha256sum or shasum to verify downloads"; fi
+}
+
+fetch_index() {
+    INDEX="$(mktemp "${TMPDIR:-/tmp}/exalib-index.XXXXXX")"
+    curl -fsSL "$EXALIB_INDEX" -o "$INDEX" || die "could not download the index from $EXALIB_INDEX"
+}
+
+# name version platform url sha256 description, for this platform
+lookup() { awk -F'\t' -v n="$1" -v p="$PLAT" '$1 == n && $3 == p' "$INDEX"; }
+
+installed_version() { cat "$LIBDIR/$1/.exalib-version" 2>/dev/null || true; }
+
+cmd_list() {
+    fetch_index
+    echo "Available for $PLAT (from $EXALIB_INDEX):"
+    awk -F'\t' -v p="$PLAT" '$3 == p { printf "  %-14s %-10s %s\n", $1, $2, $6 }' "$INDEX"
+    awk -F'\t' -v p="$PLAT" '$3 == p { n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
+    echo "Installed in $LIBDIR:"
+    found=0
+    if [ -d "$LIBDIR" ]; then
+        for d in "$LIBDIR"/*/; do
+            [ -d "$d" ] || continue
+            n="$(basename "$d")"; printf "  %-14s %s\n" "$n" "$(installed_version "$n")"; found=1
+        done
+    fi
+    [ "$found" = 1 ] || echo "  (none)"
+    rm -f "$INDEX"
+}
+
+install_one() {
+    line="$(lookup "$1")"
+    [ -n "$line" ] || die "no library '$1' for $PLAT in the index (see: exalib list)"
+    ver="$(printf '%s' "$line" | cut -f2)"; url="$(printf '%s' "$line" | cut -f4)"; want="$(printf '%s' "$line" | cut -f5)"
+    if [ "$(installed_version "$1")" = "$ver" ]; then echo "$1 $ver is up to date"; return; fi
+    echo "Installing $1 $ver"
+    mkdir -p "$LIBDIR"
+    stage="$(mktemp -d "$LIBDIR/.stage-$1.XXXXXX")"
+    trap 'rm -rf "$stage"' EXIT INT TERM
+    curl -fSL --progress-bar "$url" -o "$stage/asset.tar.gz" || die "download failed: $url"
+    got="$(sha256 "$stage/asset.tar.gz")"
+    [ "$got" = "$want" ] || die "checksum mismatch for $1 $ver: expected $want, got $got"
+    mkdir "$stage/x"; tar -xzf "$stage/asset.tar.gz" -C "$stage/x"
+    # the asset's content, or its single top-level directory
+    src="$stage/x"
+    if [ "$(ls -A "$src" | wc -l)" -eq 1 ] && [ -d "$src/$(ls -A "$src")" ]; then src="$src/$(ls -A "$src")"; fi
+    ls "$src/lib/lib$1".* >/dev/null 2>&1 || die "the asset for $1 has no lib/lib$1.<ext>"
+    echo "$ver" > "$src/.exalib-version"
+    # swap into place: a failed install never leaves a half-installed library
+    rm -rf "$LIBDIR/.old-$1"
+    [ -d "$LIBDIR/$1" ] && mv "$LIBDIR/$1" "$LIBDIR/.old-$1"
+    mv "$src" "$LIBDIR/$1"
+    rm -rf "$LIBDIR/.old-$1" "$stage"
+    trap - EXIT INT TERM
+    echo "Installed $1 $ver in $LIBDIR/$1"
+}
+
+cmd_install() {
+    [ "$#" -gt 0 ] || die "usage: exalib install NAME..."
+    fetch_index
+    for n in "$@"; do install_one "$n"; done
+    rm -f "$INDEX"
+}
+
+cmd_up() {
+    names=""
+    if [ -d "$LIBDIR" ]; then
+        for d in "$LIBDIR"/*/; do [ -d "$d" ] && names="$names $(basename "$d")"; done
+    fi
+    [ -n "$names" ] || { echo "nothing installed"; return; }
+    # shellcheck disable=SC2086
+    cmd_install $names
+}
+
+cmd_remove() {
+    [ "$#" -gt 0 ] || die "usage: exalib remove NAME..."
+    for n in "$@"; do
+        [ -d "$LIBDIR/$n" ] || die "$n is not installed"
+        rm -rf "${LIBDIR:?}/$n"; echo "Removed $n"
+    done
+}
+
+PLAT="$(platform)"
+case "${1:-}" in
+    list) cmd_list ;;
+    install) shift; cmd_install "$@" ;;
+    up|update) cmd_up ;;
+    remove|uninstall) shift; cmd_remove "$@" ;;
+    path) echo "$LIBDIR" ;;
+    ""|-h|--help|help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *) die "unknown command '$1' (see: exalib help)" ;;
+esac

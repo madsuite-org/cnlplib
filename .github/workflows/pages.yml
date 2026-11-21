@@ -1,0 +1,54 @@
+name: registry
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate entries and build the index
+        run: python3 scripts/build_index.py
+      - name: Check the shell scripts
+        run: |
+          sh -n install.sh
+          sh -n bin/exalib
+
+  publish:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the site
+        run: |
+          python3 scripts/build_index.py
+          cp install.sh site/install
+          cp install.sh site/install.sh
+          cp bin/exalib site/exalib
+          printf '<!doctype html><meta charset="utf-8"><title>exalib</title><p>exalib registry. Install: <code>curl -fsSL https://madsuite.org/exalib/install | sh</code>. Index: <a href="index.json">index.json</a>. Source: <a href="https://github.com/madsuite-org/exalib">madsuite-org/exalib</a>.</p>\n' > site/index.html
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
