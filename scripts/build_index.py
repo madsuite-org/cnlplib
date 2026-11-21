@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Validate libraries/*.toml and write the index (index.json, index.tsv) into site/.
+"""Validate libraries/*.toml and data/*.toml and write the index (index.json, index.tsv)
+into site/.
 
-index.tsv has one line per library and platform for the newest version:
-name, version, platform, url, sha256, description (tab-separated). The installer reads
-it with plain shell tools.
+index.tsv has one line per library and platform, and one per data set, for the newest
+version: name, version, platform, url, sha256, description, kind, requires
+(tab-separated). Data sets have platform `any` and kind `data`; `requires` lists the data
+sets a library needs (comma-separated). The installer reads it with plain shell tools.
 """
 import json, os, re, sys, tomllib
 
@@ -11,6 +13,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NAME = re.compile(r"^[a-z0-9_]+$")
 PLATFORM = re.compile(r"^(linux|macos|windows)-(x86_64|aarch64)$")
 SHA = re.compile(r"^[0-9a-f]{64}$")
+DATA_REQUIRED = ("name", "description", "homepage", "license", "maintainers", "versions")
 REQUIRED = ("name", "description", "producer", "homepage", "license", "maintainers", "models", "versions")
 
 
@@ -38,34 +41,67 @@ def check(path):
                 errs.append(f"version {v.get('version')} {plat}: url must be https")
             if not SHA.match(str(a.get("sha256", ""))):
                 errs.append(f"version {v.get('version')} {plat}: sha256 must be 64 hex digits")
+    for d in e.get("data", []):
+        if not os.path.isfile(os.path.join(ROOT, "data", f"{d}.toml")):
+            errs.append(f"`data` names {d!r}, which has no data/{d}.toml")
     return e, errs
 
 
-def main():
-    lib_dir, site = os.path.join(ROOT, "libraries"), os.path.join(ROOT, "site")
+def check_data(path):
+    with open(path, "rb") as f:
+        e = tomllib.load(f)
+    errs = [f"missing `{k}`" for k in DATA_REQUIRED if k not in e]
+    if errs:
+        return None, errs
+    stem = os.path.splitext(os.path.basename(path))[0]
+    if e["name"] != stem:
+        errs.append(f"`name` is {e['name']!r} but the file is {stem}.toml")
+    if not NAME.match(e["name"]):
+        errs.append("`name` must be lowercase [a-z0-9_]")
+    for v in e["versions"]:
+        if not str(v.get("url", "")).startswith("https://"):
+            errs.append(f"version {v.get('version')}: url must be https")
+        if not SHA.match(str(v.get("sha256", ""))):
+            errs.append(f"version {v.get('version')}: sha256 must be 64 hex digits")
+    return e, errs
+
+
+def load_dir(sub, checker):
+    d = os.path.join(ROOT, sub)
     entries, failed = [], False
-    for fn in sorted(os.listdir(lib_dir)):
+    for fn in sorted(os.listdir(d)) if os.path.isdir(d) else []:
         if not fn.endswith(".toml"):
             continue
-        e, errs = check(os.path.join(lib_dir, fn))
-        if errs:
-            failed = True
-            for m in errs:
-                print(f"libraries/{fn}: {m}", file=sys.stderr)
-        else:
+        e, errs = checker(os.path.join(d, fn))
+        for m in errs:
+            print(f"{sub}/{fn}: {m}", file=sys.stderr)
+        failed |= bool(errs)
+        if not errs:
             entries.append(e)
-    if failed:
+    return entries, failed
+
+
+def main():
+    site = os.path.join(ROOT, "site")
+    entries, f1 = load_dir("libraries", check)
+    data, f2 = load_dir("data", check_data)
+    if f1 or f2:
         sys.exit(1)
     os.makedirs(site, exist_ok=True)
     with open(os.path.join(site, "index.json"), "w") as f:
-        json.dump({"format": "exalib-index", "format_version": "1", "libraries": entries}, f, indent=1)
+        json.dump({"format": "exalib-index", "format_version": "1", "libraries": entries, "data": data}, f, indent=1)
     with open(os.path.join(site, "index.tsv"), "w") as f:
         for e in entries:
             v = e["versions"][-1]
             for plat, a in sorted(v["assets"].items()):
                 desc = e["description"].replace("\t", " ")
-                f.write(f"{e['name']}\t{v['version']}\t{plat}\t{a['url']}\t{a['sha256']}\t{desc}\n")
-    print(f"index: {len(entries)} libraries")
+                req = ",".join(e.get("data", []))
+                f.write(f"{e['name']}\t{v['version']}\t{plat}\t{a['url']}\t{a['sha256']}\t{desc}\tlib\t{req}\n")
+        for e in data:
+            v = e["versions"][-1]
+            desc = e["description"].replace("\t", " ")
+            f.write(f"{e['name']}\t{v['version']}\tany\t{v['url']}\t{v['sha256']}\t{desc}\tdata\t\n")
+    print(f"index: {len(entries)} libraries, {len(data)} data sets")
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ homepage    = "https://github.com/madsuite-org/ExaModelsPower.jl"
 license     = "MIT"
 maintainers = ["sshin23"]
 models      = ["acp", "acr", "dcp"]
+data        = ["pglib"]                 # installed with it; cases by name
 
 [[versions]]
 version  = "0.0.0-preview.1"
