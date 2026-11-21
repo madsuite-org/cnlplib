@@ -6,7 +6,7 @@ compiled ExaModelsPower, COPS and Luksan–Vlček models. Any library implementi
 can be listed, whatever produced it.
 
 ```sh
-curl -fsSL https://madsuite.org/exalib/install | sh     # installs the exalib command
+curl -fsSL https://exalib.madsuite.org/install | sh     # installs the exalib command
 exalib list                                            # available and installed libraries
 exalib install emp cops                                # into ~/.exalib/lib
 exalib up                                              # update everything installed
@@ -34,8 +34,8 @@ line, C, Python and cluster installs, and for libraries from other producers.
   GitHub Releases. exalib does not rehost binaries.
 - This repository lists them: one TOML file per library in [libraries/](libraries/),
   with the download URL and SHA-256 of each platform's asset.
-- CI validates every entry and publishes the index ([index.json](https://madsuite.org/exalib/index.json),
-  and `index.tsv` for the installer) and the installer to `https://madsuite.org/exalib/`.
+- CI validates every entry and publishes the index ([index.json](https://exalib.madsuite.org/index.json),
+  and `index.tsv` for the installer) and the installer to `https://exalib.madsuite.org/`.
 
 ## Adding a library
 

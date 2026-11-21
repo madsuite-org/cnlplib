@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install the exalib command:  curl -fsSL https://madsuite.org/exalib/install | sh
+# Install the exalib command:  curl -fsSL https://exalib.madsuite.org/install | sh
 #
 # Options (after `sh -s --`):
 #   -y                 do not ask for confirmation
@@ -11,7 +11,7 @@
 # so cnlp consumers find installed libraries by name. Run it again to update exalib.
 set -eu
 
-BASE="${EXALIB_BASE:-https://madsuite.org/exalib}"
+BASE="${EXALIB_BASE:-https://exalib.madsuite.org}"
 PREFIX="$HOME/.exalib"; YES=0; ADD=yes
 while [ "$#" -gt 0 ]; do
     case "$1" in

@@ -45,7 +45,7 @@ jobs:
           cp install.sh site/install
           cp install.sh site/install.sh
           cp bin/exalib site/exalib
-          printf '<!doctype html><meta charset="utf-8"><title>exalib</title><p>exalib registry. Install: <code>curl -fsSL https://madsuite.org/exalib/install | sh</code>. Index: <a href="index.json">index.json</a>. Source: <a href="https://github.com/madsuite-org/exalib">madsuite-org/exalib</a>.</p>\n' > site/index.html
+          printf '<!doctype html><meta charset="utf-8"><title>exalib</title><p>exalib registry. Install: <code>curl -fsSL https://exalib.madsuite.org/install | sh</code>. Index: <a href="index.json">index.json</a>. Source: <a href="https://github.com/exalib.madsuite.org">exalib.madsuite.org</a>.</p>\n' > site/index.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
