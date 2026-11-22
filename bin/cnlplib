@@ -1,23 +1,23 @@
 #!/bin/sh
-# exalib: install compiled optimization model libraries (cnlp ABI) from the exalib registry.
+# cnlplib: install compiled optimization model libraries (cnlp ABI) from the cnlplib registry.
 #
-#   exalib list               available libraries for this platform, and what is installed
-#   exalib install NAME...    install or update libraries (into $EXALIB_HOME/lib/NAME) or
-#                             data sets (into $EXALIB_HOME/data/NAME); a library brings
+#   cnlplib list               available libraries for this platform, and what is installed
+#   cnlplib install NAME...    install or update libraries (into $CNLPLIB_HOME/lib/NAME) or
+#                             data sets (into $CNLPLIB_HOME/data/NAME); a library brings
 #                             the data sets it needs
-#   exalib up                 update everything installed to the newest version
-#   exalib remove NAME...     remove installed libraries or data sets
-#   exalib path               print the library directory (for CNLPMODELS_PATH)
+#   cnlplib up                 update everything installed to the newest version
+#   cnlplib remove NAME...     remove installed libraries or data sets
+#   cnlplib path               print the library directory (for CNLPMODELS_PATH)
 #
-# Environment: EXALIB_HOME (default ~/.exalib), EXALIB_INDEX (default the published index).
+# Environment: CNLPLIB_HOME (default ~/.cnlplib), CNLPLIB_INDEX (default the published index).
 set -eu
 
-EXALIB_HOME="${EXALIB_HOME:-$HOME/.exalib}"
-EXALIB_INDEX="${EXALIB_INDEX:-https://exalib.madsuite.org/index.tsv}"
-LIBDIR="$EXALIB_HOME/lib"
-DATADIR="$EXALIB_HOME/data"
+CNLPLIB_HOME="${CNLPLIB_HOME:-$HOME/.cnlplib}"
+CNLPLIB_INDEX="${CNLPLIB_INDEX:-https://cnlplib.madsuite.org/index.tsv}"
+LIBDIR="$CNLPLIB_HOME/lib"
+DATADIR="$CNLPLIB_HOME/data"
 
-die() { echo "exalib: $*" >&2; exit 1; }
+die() { echo "cnlplib: $*" >&2; exit 1; }
 
 platform() {
     case "$(uname -s)" in
@@ -38,21 +38,21 @@ sha256() {
 }
 
 fetch_index() {
-    INDEX="$(mktemp "${TMPDIR:-/tmp}/exalib-index.XXXXXX")"
-    curl -fsSL "$EXALIB_INDEX" -o "$INDEX" || die "could not download the index from $EXALIB_INDEX"
+    INDEX="$(mktemp "${TMPDIR:-/tmp}/cnlplib-index.XXXXXX")"
+    curl -fsSL "$CNLPLIB_INDEX" -o "$INDEX" || die "could not download the index from $CNLPLIB_INDEX"
 }
 
 # name version platform url sha256 description kind requires, for this platform
 lookup() { awk -F'\t' -v n="$1" -v p="$PLAT" '$1 == n && ($3 == p || $3 == "any")' "$INDEX" | head -n 1; }
 
-installed_version() { cat "$LIBDIR/$1/.exalib-version" "$DATADIR/$1/.exalib-version" 2>/dev/null | head -n 1; }
+installed_version() { cat "$LIBDIR/$1/.cnlplib-version" "$DATADIR/$1/.cnlplib-version" 2>/dev/null | head -n 1; }
 
 list_dir() {
     found=0
     if [ -d "$1" ]; then
         for d in "$1"/*/; do
             [ -d "$d" ] || continue
-            n="$(basename "$d")"; printf "  %-14s %s\n" "$n" "$(cat "$d/.exalib-version" 2>/dev/null)"; found=1
+            n="$(basename "$d")"; printf "  %-14s %s\n" "$n" "$(cat "$d/.cnlplib-version" 2>/dev/null)"; found=1
         done
     fi
     [ "$found" = 1 ] || echo "  (none)"
@@ -60,7 +60,7 @@ list_dir() {
 
 cmd_list() {
     fetch_index
-    echo "Libraries for $PLAT (from $EXALIB_INDEX):"
+    echo "Libraries for $PLAT (from $CNLPLIB_INDEX):"
     awk -F'\t' -v p="$PLAT" '$3 == p { printf "  %-14s %-16s %s\n", $1, $2, $6; n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
     echo "Data sets:"
     awk -F'\t' '$3 == "any" { printf "  %-14s %-16s %s\n", $1, $2, $6; n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
@@ -71,7 +71,7 @@ cmd_list() {
 
 install_one() {
     line="$(lookup "$1")"
-    [ -n "$line" ] || die "no library '$1' for $PLAT in the index (see: exalib list)"
+    [ -n "$line" ] || die "no library '$1' for $PLAT in the index (see: cnlplib list)"
     # data sets it needs first (sh has no locals: re-read this entry afterwards)
     for r in $(printf '%s' "$line" | cut -f8 | tr ',' ' '); do install_one "$r"; done
     line="$(lookup "$1")"
@@ -91,7 +91,7 @@ install_one() {
     src="$stage/x"
     if [ "$(ls -A "$src" | wc -l)" -eq 1 ] && [ -d "$src/$(ls -A "$src")" ]; then src="$src/$(ls -A "$src")"; fi
     [ "$kind" = data ] || ls "$src/lib/lib$1".* >/dev/null 2>&1 || die "the asset for $1 has no lib/lib$1.<ext>"
-    echo "$ver" > "$src/.exalib-version"
+    echo "$ver" > "$src/.cnlplib-version"
     # swap into place: a failed install never leaves a half-installed library
     rm -rf "$dest/.old-$1"
     [ -d "$dest/$1" ] && mv "$dest/$1" "$dest/.old-$1"
@@ -102,7 +102,7 @@ install_one() {
 }
 
 cmd_install() {
-    [ "$#" -gt 0 ] || die "usage: exalib install NAME..."
+    [ "$#" -gt 0 ] || die "usage: cnlplib install NAME..."
     fetch_index
     for n in "$@"; do install_one "$n"; done
     rm -f "$INDEX"
@@ -120,7 +120,7 @@ cmd_up() {
 }
 
 cmd_remove() {
-    [ "$#" -gt 0 ] || die "usage: exalib remove NAME..."
+    [ "$#" -gt 0 ] || die "usage: cnlplib remove NAME..."
     for n in "$@"; do
         if [ -d "$LIBDIR/$n" ]; then rm -rf "${LIBDIR:?}/$n"
         elif [ -d "$DATADIR/$n" ]; then rm -rf "${DATADIR:?}/$n"
@@ -137,5 +137,5 @@ case "${1:-}" in
     remove|uninstall) shift; cmd_remove "$@" ;;
     path) echo "$LIBDIR" ;;
     ""|-h|--help|help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
-    *) die "unknown command '$1' (see: exalib help)" ;;
+    *) die "unknown command '$1' (see: cnlplib help)" ;;
 esac

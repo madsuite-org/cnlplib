@@ -89,7 +89,7 @@ def main():
         sys.exit(1)
     os.makedirs(site, exist_ok=True)
     with open(os.path.join(site, "index.json"), "w") as f:
-        json.dump({"format": "exalib-index", "format_version": "1", "libraries": entries, "data": data}, f, indent=1)
+        json.dump({"format": "cnlplib-index", "format_version": "1", "libraries": entries, "data": data}, f, indent=1)
     with open(os.path.join(site, "index.tsv"), "w") as f:
         for e in entries:
             v = e["versions"][-1]

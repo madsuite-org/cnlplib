@@ -1,7 +1,7 @@
 # Library entries
 
 One file per library, `libraries/<name>.toml`. `<name>` is what users install
-(`exalib install <name>`) and the name consumers resolve (`@<name>`), so the library file
+(`cnlplib install <name>`) and the name consumers resolve (`@<name>`), so the library file
 inside each asset must be `lib/lib<name>.<ext>`.
 
 ```toml
