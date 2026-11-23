@@ -1,0 +1,11 @@
+name             = "ipopt"
+description      = "Ipopt (interior point), with MUMPS; the reference solver"
+homepage         = "https://github.com/coin-or/Ipopt"
+license          = "EPL-2.0"
+maintainers      = ["sshin23"]
+repo             = "madsuite-org/cnlplib"   # built and released here (adapters/ipopt)
+nightly          = true
+rolling          = true                     # only the rolling `nightly` release, for now
+platforms        = ["linux-x86_64"]
+solver_interface = "0.1"
+backends         = ["cpu"]

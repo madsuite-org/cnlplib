@@ -1,15 +1,18 @@
 #!/bin/sh
-# cnlplib: install compiled optimization model libraries (cnlp ABI) from the cnlplib registry.
+# cnlp: install compiled optimization models (cnlp libraries) and solvers from the cnlplib
+# registry, and solve the models.
 #
-#   cnlplib list               available libraries for this platform, and what is installed
-#   cnlplib install NAME...    install or update libraries (into $CNLPLIB_HOME/lib/NAME) or
-#                             data sets (into $CNLPLIB_HOME/data/NAME); a library brings
+#   cnlp list               available libraries for this platform, and what is installed
+#   cnlp install NAME...    install or update libraries ($CNLPLIB_HOME/lib/NAME), solvers
+#                             ($CNLPLIB_HOME/solvers/NAME) or data sets
+#                             ($CNLPLIB_HOME/data/NAME); a library brings
 #                             the data sets it needs. NAME is the latest release,
 #                             NAME@nightly the rolling build of the default branch,
 #                             NAME@1.2.3 that version
-#   cnlplib up                 update everything installed (a pinned version stays)
-#   cnlplib remove NAME...     remove installed libraries or data sets
-#   cnlplib path               print the library directory (for CNLPMODELS_PATH)
+#   cnlp up                 update everything installed (a pinned version stays)
+#   cnlp solve ...          solve a model with an installed solver (see: cnlp solve --help)
+#   cnlp remove NAME...     remove installed libraries, solvers or data sets
+#   cnlp path               print the library directory (for CNLPLIB_PATH)
 #
 # Environment: CNLPLIB_HOME (default ~/.cnlplib), CNLPLIB_INDEX (default the published index).
 set -eu
@@ -18,8 +21,9 @@ CNLPLIB_HOME="${CNLPLIB_HOME:-$HOME/.cnlplib}"
 CNLPLIB_INDEX="${CNLPLIB_INDEX:-https://cnlplib.madsuite.org/index.tsv}"
 LIBDIR="$CNLPLIB_HOME/lib"
 DATADIR="$CNLPLIB_HOME/data"
+SOLVERDIR="$CNLPLIB_HOME/solvers"
 
-die() { echo "cnlplib: $*" >&2; exit 1; }
+die() { echo "cnlp: $*" >&2; exit 1; }
 
 platform() {
     case "$(uname -s)" in
@@ -44,12 +48,12 @@ fetch_index() {
     curl -fsSL "$CNLPLIB_INDEX" -o "$INDEX" || die "could not download the index from $CNLPLIB_INDEX"
 }
 
-# name label platform url sha256 description kind requires versioned-url, for this platform
+# name label platform url sha256 description kind requires versioned-url backends, for this platform
 # (sha256 `-`: in the SHA256SUMS next to the asset; versioned-url has `{version}`)
 lookup() { awk -F'\t' -v n="$1" -v p="$PLAT" '$1 == n && ($3 == p || $3 == "any")' "$INDEX" | head -n 1; }
 
 # what is installed: "<version> <sha256> <request>"
-installed() { cat "$LIBDIR/$1/.cnlplib-version" "$DATADIR/$1/.cnlplib-version" 2>/dev/null | head -n 1; }
+installed() { cat "$LIBDIR/$1/.cnlplib-version" "$SOLVERDIR/$1/.cnlplib-version" "$DATADIR/$1/.cnlplib-version" 2>/dev/null | head -n 1; }
 
 list_dir() {
     found=0
@@ -66,10 +70,14 @@ list_dir() {
 cmd_list() {
     fetch_index
     echo "Libraries for $PLAT (from $CNLPLIB_INDEX):"
-    awk -F'\t' -v p="$PLAT" '$3 == p { printf "  %-14s %-16s %s\n", $1, $2, $6; n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
+    printf "  %-14s %-10s %-10s %s\n" NAME RELEASE BACKENDS DESCRIPTION
+    awk -F'\t' -v p="$PLAT" '$3 == p && $7 == "lib" { printf "  %-14s %-10s %-10s %s\n", $1, $2, $10, $6; n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
+    echo "Solvers:"
+    awk -F'\t' -v p="$PLAT" '$3 == p && $7 == "solver" { printf "  %-14s %-10s %-10s %s\n", $1, $2, $10, $6; n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
     echo "Data sets:"
     awk -F'\t' '$3 == "any" { printf "  %-14s %-16s %s\n", $1, $2, $6; n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
     echo "Installed in $LIBDIR:"; list_dir "$LIBDIR"
+    echo "Installed in $SOLVERDIR:"; list_dir "$SOLVERDIR"
     echo "Installed in $DATADIR:"; list_dir "$DATADIR"
     rm -f "$INDEX"
 }
@@ -82,7 +90,7 @@ install_one() {
         nightly) line="$(lookup "$n@nightly")" ;;
         *) line="$(lookup "$n")" ;;
     esac
-    [ -n "$line" ] || die "no '$req' for $PLAT in the index (see: cnlplib list)"
+    [ -n "$line" ] || die "no '$req' for $PLAT in the index (see: cnlp list)"
     # data sets it needs first (sh has no locals: re-read this entry's fields afterwards)
     for r in $(printf '%s' "$line" | cut -f8 | tr ',' ' '); do install_one "$r"; done
     req="$1"; n="${req%%@*}"; sel=""
@@ -95,7 +103,7 @@ install_one() {
         *)  [ -n "$tmpl" ] && [ "$tmpl" != "-" ] || die "$n has no versioned releases"
             url="$(printf '%s' "$tmpl" | sed "s/{version}/$sel/g")"; ver="$sel"; want="-" ;;
     esac
-    dest="$LIBDIR"; [ "$kind" = data ] && dest="$DATADIR"
+    dest="$LIBDIR"; [ "$kind" = data ] && dest="$DATADIR"; [ "$kind" = solver ] && dest="$SOLVERDIR"
     if [ "$want" = "-" ]; then
         # published with the asset: the SHA256SUMS of the same release
         want="$(curl -fsSL "${url%/*}/SHA256SUMS" 2>/dev/null | awk -v f="${url##*/}" '$2 == f || $2 == "*" f { print $1 }')"
@@ -118,7 +126,10 @@ install_one() {
     # the asset's content, or its single top-level directory
     src="$stage/x"
     if [ "$(ls -A "$src" | wc -l)" -eq 1 ] && [ -d "$src/$(ls -A "$src")" ]; then src="$src/$(ls -A "$src")"; fi
-    [ "$kind" = data ] || ls "$src/lib/lib$n".* >/dev/null 2>&1 || die "the asset for $req has no lib/lib$n.<ext>"
+    case "$kind" in
+        lib) ls "$src/lib/lib$n".* >/dev/null 2>&1 || die "the asset for $req has no lib/lib$n.<ext>" ;;
+        solver) ls "$src/lib/libcnlp_$n".* >/dev/null 2>&1 || die "the asset for $req has no lib/libcnlp_$n.<ext>" ;;
+    esac
     # the version the asset says it is, if it says
     v="$(sed -n 's/^version *= *//p' "$src/VERSION" 2>/dev/null | head -n 1)"; [ -n "$v" ] && ver="$v"
     echo "$ver $want $req" > "$src/.cnlplib-version"
@@ -132,7 +143,7 @@ install_one() {
 }
 
 cmd_install() {
-    [ "$#" -gt 0 ] || die "usage: cnlplib install NAME..."
+    [ "$#" -gt 0 ] || die "usage: cnlp install NAME..."
     fetch_index
     for n in "$@"; do install_one "$n"; done
     rm -f "$INDEX"
@@ -140,7 +151,7 @@ cmd_install() {
 
 cmd_up() {
     names=""
-    for dir in "$LIBDIR" "$DATADIR"; do
+    for dir in "$LIBDIR" "$SOLVERDIR" "$DATADIR"; do
         [ -d "$dir" ] || continue
         for d in "$dir"/*/; do
             [ -d "$d" ] || continue
@@ -155,9 +166,10 @@ cmd_up() {
 }
 
 cmd_remove() {
-    [ "$#" -gt 0 ] || die "usage: cnlplib remove NAME..."
+    [ "$#" -gt 0 ] || die "usage: cnlp remove NAME..."
     for n in "$@"; do
         if [ -d "$LIBDIR/$n" ]; then rm -rf "${LIBDIR:?}/$n"
+        elif [ -d "$SOLVERDIR/$n" ]; then rm -rf "${SOLVERDIR:?}/$n"
         elif [ -d "$DATADIR/$n" ]; then rm -rf "${DATADIR:?}/$n"
         else die "$n is not installed"; fi
         echo "Removed $n"
@@ -171,6 +183,10 @@ case "${1:-}" in
     up|update) cmd_up ;;
     remove|uninstall) shift; cmd_remove "$@" ;;
     path) echo "$LIBDIR" ;;
-    ""|-h|--help|help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' ;;
-    *) die "unknown command '$1' (see: cnlplib help)" ;;
+    solve) shift
+        d="$CNLPLIB_HOME/bin/cnlp-solve"
+        [ -x "$d" ] || d="$(command -v cnlp-solve 2>/dev/null)" || die "cnlp-solve is not installed (rerun the installer)"
+        exec "$d" "$@" ;;
+    ""|-h|--help|help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *) die "unknown command '$1' (see: cnlp help)" ;;
 esac

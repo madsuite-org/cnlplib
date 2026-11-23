@@ -10,9 +10,13 @@ and checks each against the SHA256SUMS of the same release. (`url`, a template w
 
 index.tsv has one line per library, channel and platform, and one per data set: name,
 label, platform, url, sha256 (`-`: in the SHA256SUMS next to the asset), description,
-kind, requires, versioned url (`{version}` substituted; `-` if none), tab-separated. The
+kind, requires, versioned url (`{version}` substituted; `-` if none), backends
+(comma-separated: a solver's `backends`, or `cpu` plus a library's `device` tiers),
+tab-separated. The
 nightly channel's lines are named `<name>@nightly`. Data sets have platform `any`, kind
-`data` and a sha256. The installer reads it with plain shell tools.
+`data` and a sha256. Solvers (solvers/*.toml) are listed the same way with kind `solver`; a `rolling` entry has
+no versioned releases, so its plain name installs the `nightly` release. The installer
+reads it with plain shell tools.
 """
 import json, os, re, sys, tomllib
 
@@ -24,12 +28,15 @@ SHA = re.compile(r"^[0-9a-f]{64}$")
 DATA_REQUIRED = ("name", "description", "homepage", "license", "maintainers", "versions")
 REQUIRED = ("name", "description", "producer", "homepage", "license", "maintainers", "models",
             "cnlp_abi", "platforms")
+SOLVER_REQUIRED = ("name", "description", "homepage", "license", "maintainers", "solver_interface",
+                   "platforms", "repo", "backends")
+BACKENDS = {"cpu", "cuda", "rocm", "oneapi", "metal"}
 
 
-def check(path):
+def check(path, required=REQUIRED):
     with open(path, "rb") as f:
         e = tomllib.load(f)
-    errs = [f"missing `{k}`" for k in REQUIRED if k not in e]
+    errs = [f"missing `{k}`" for k in required if k not in e]
     if errs:
         return None, errs
     stem = os.path.splitext(os.path.basename(path))[0]
@@ -43,11 +50,16 @@ def check(path):
         errs.append("`repo` must be owner/name")
     if "url" in e and not (e["url"].startswith("https://") and "{platform}" in e["url"]):
         errs.append("`url` must be an https template containing {platform}")
+    if e.get("rolling") and not e.get("nightly"):
+        errs.append("a `rolling` entry needs `nightly`")
     if e.get("nightly") and "repo" not in e:
         errs.append("`nightly` needs `repo`")
     for plat in e["platforms"]:
         if not PLATFORM.match(plat):
             errs.append(f"platform {plat!r} is not <os>-<arch>")
+    for b in e.get("backends", []):
+        if b not in BACKENDS:
+            errs.append(f"backend {b!r} is not one of {sorted(BACKENDS)}")
     for d in e.get("data", []):
         if not os.path.isfile(os.path.join(ROOT, "data", f"{d}.toml")):
             errs.append(f"`data` names {d!r}, which has no data/{d}.toml")
@@ -92,30 +104,36 @@ def main():
     site = os.path.join(ROOT, "site")
     entries, f1 = load_dir("libraries", check)
     data, f2 = load_dir("data", check_data)
-    if f1 or f2:
+    solvers, f3 = load_dir("solvers", lambda p: check(p, SOLVER_REQUIRED))
+    if f1 or f2 or f3:
         sys.exit(1)
     os.makedirs(site, exist_ok=True)
     with open(os.path.join(site, "index.json"), "w") as f:
-        json.dump({"format": "cnlplib-index", "format_version": "2", "libraries": entries, "data": data}, f, indent=1)
+        json.dump({"format": "cnlplib-index", "format_version": "2", "libraries": entries, "data": data, "solvers": solvers}, f, indent=1)
     with open(os.path.join(site, "index.tsv"), "w") as f:
-        for e in entries:
-            desc = e["description"].replace("\t", " ")
-            req = ",".join(e.get("data", []))
-            n = e["name"]
-            for plat in sorted(e["platforms"]):
-                asset = f"{n}-{plat}.tar.gz"
-                if "url" in e:
-                    f.write(f"{n}\t{e.get('label', 'fixed')}\t{plat}\t{e['url'].replace('{platform}', plat)}\t-\t{desc}\tlib\t{req}\t-\n")
-                    continue
-                base = f"https://github.com/{e['repo']}/releases"
-                f.write(f"{n}\tlatest\t{plat}\t{base}/latest/download/{asset}\t-\t{desc}\tlib\t{req}\t{base}/download/v{{version}}/{asset}\n")
-                if e.get("nightly"):
-                    f.write(f"{n}@nightly\tnightly\t{plat}\t{base}/download/nightly/{asset}\t-\t{desc}\tlib\t{req}\t-\n")
+        for kind, group in (("lib", entries), ("solver", solvers)):
+            for e in group:
+                desc = e["description"].replace("\t", " ")
+                req = ",".join(e.get("data", []))
+                n = e["name"]
+                be = ",".join(e["backends"] if kind == "solver" else ["cpu", *e.get("device", [])])
+                for plat in sorted(e["platforms"]):
+                    asset = f"{n}-{plat}.tar.gz"
+                    if "url" in e:
+                        f.write(f"{n}\t{e.get('label', 'fixed')}\t{plat}\t{e['url'].replace('{platform}', plat)}\t-\t{desc}\t{kind}\t{req}\t-\t{be}\n")
+                        continue
+                    base = f"https://github.com/{e['repo']}/releases"
+                    if e.get("rolling"):
+                        f.write(f"{n}\tnightly\t{plat}\t{base}/download/nightly/{asset}\t-\t{desc}\t{kind}\t{req}\t-\t{be}\n")
+                        continue
+                    f.write(f"{n}\tlatest\t{plat}\t{base}/latest/download/{asset}\t-\t{desc}\t{kind}\t{req}\t{base}/download/v{{version}}/{asset}\t{be}\n")
+                    if e.get("nightly"):
+                        f.write(f"{n}@nightly\tnightly\t{plat}\t{base}/download/nightly/{asset}\t-\t{desc}\t{kind}\t{req}\t-\t{be}\n")
         for e in data:
             v = e["versions"][-1]
             desc = e["description"].replace("\t", " ")
-            f.write(f"{e['name']}\t{v['version']}\tany\t{v['url']}\t{v['sha256']}\t{desc}\tdata\t\t-\n")
-    print(f"index: {len(entries)} libraries, {len(data)} data sets")
+            f.write(f"{e['name']}\t{v['version']}\tany\t{v['url']}\t{v['sha256']}\t{desc}\tdata\t\t-\t-\n")
+    print(f"index: {len(entries)} libraries, {len(solvers)} solvers, {len(data)} data sets")
 
 
 if __name__ == "__main__":

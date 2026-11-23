@@ -1,0 +1,71 @@
+# cnlplib's own binaries: the cnlp-solve driver and the Ipopt solver. Built and checked on
+# every change; a push to main (or a manual run on it) replaces the assets of the rolling
+# `nightly` release, which the installer and `cnlp install ipopt` download.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # glibc 2.28 (RHEL 8 and newer), so the binaries run on older systems too
+    container: quay.io/pypa/manylinux_2_28_x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Julia (for the Ipopt and OpenBLAS binaries)
+        run: |
+          curl -fsSL https://install.julialang.org | sh -s -- --yes --default-channel 1.12
+          echo "$HOME/.juliaup/bin" >> "$GITHUB_PATH"
+      - uses: actions/cache@v4
+        with:
+          path: build/hdf5
+          key: hdf5-1.14.6-manylinux_2_28
+      - name: Build
+        run: sh scripts/build-cnlp.sh linux-x86_64 dist
+      - name: Check the solver
+        run: |
+          python3.12 -m venv /tmp/py && /tmp/py/bin/pip install -q h5py
+          H=$(mktemp -d); mkdir -p "$H/solvers" "$H/bin"
+          tar -xzf dist/ipopt-linux-x86_64.tar.gz -C "$H/solvers"
+          tar -xzf dist/cnlp-solve-linux-x86_64.tar.gz -C "$H"
+          CNLPLIB_HOME="$H" /tmp/py/bin/python conformance/check_solver.py ipopt "$H/cnlp-solve/bin/cnlp-solve"
+      - name: End to end (installer, cnlp install, every cnlp solve path)
+        run: sh conformance/cli/check_cli.sh dist /tmp/py/bin/python
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cnlp-binaries
+          path: dist/*
+
+  publish:
+    needs: build
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cnlp-binaries
+          path: dist
+      - name: Nightly release
+        run: |
+          cd dist && sha256sum -- *.tar.gz *.tar > SHA256SUMS && cat SHA256SUMS && cd ..
+          gh api -X PATCH "repos/$REPO/git/refs/tags/nightly" -f sha="$GITHUB_SHA" -F force=true > /dev/null 2>&1 ||
+            gh api -X POST "repos/$REPO/git/refs" -f ref=refs/tags/nightly -f sha="$GITHUB_SHA" > /dev/null
+          notes="cnlp-solve and the Ipopt solver, built from $GITHUB_SHA on $(date -u +%Y-%m-%d). Install: curl -fsSL https://cnlplib.madsuite.org/install | sh; cnlp install ipopt"
+          if gh release view nightly -R "$REPO" > /dev/null 2>&1; then
+            gh release edit nightly -R "$REPO" --prerelease --notes "$notes"
+          else
+            gh release create nightly -R "$REPO" --prerelease --title "Nightly" --notes "$notes"
+          fi
+          gh release upload nightly -R "$REPO" --clobber dist/*.tar.gz dist/*.tar dist/SHA256SUMS

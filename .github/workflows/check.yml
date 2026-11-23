@@ -1,0 +1,23 @@
+name: check
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install h5py
+      - name: header compiles as C99 and C++
+        run: |
+          printf '#include "cnlp.h"\nCNLP_DECLARE_MODEL(m) CNLP_DECLARE_NEW_STR(m) CNLP_DECLARE_BUILDER(m) CNLP_DECLARE_LAYOUT(m) CNLP_DECLARE_SENSE(m) CNLP_DECLARE_WRITERS(m) CNLP_DECLARE_READERS(m) CNLP_DECLARE_DEVICE(m) CNLP_DECLARE_SINGLE(m) CNLP_DECLARE_SINGLE_DEVICE(m) CNLP_DECLARE_FORMATS(m)\nint main(void){return 0;}\n' > t.c
+          cc -std=c99 -Wall -Wextra -pedantic -Werror -I. t.c -o t
+          c++ -std=c++11 -Wall -Werror -x c++ -I. t.c -o t2
+      - name: the solver interface compiles as C99 and C++, and the example solver builds
+        run: |
+          printf '#include "cnlp_solver.h"\nCNLP_DECLARE_SOLVER\nint main(void){return 0;}\n' > s.c
+          cc -std=c99 -Wall -Wextra -pedantic -Werror -I. s.c -o s
+          c++ -std=c++11 -Wall -Werror -x c++ -I. s.c -o s2
+          cc -std=c99 -Wall -Wextra -pedantic -Werror -shared -fPIC -I. -o libcnlp_newton.so example/solver.c -lm
+      - run: python conformance/check.py

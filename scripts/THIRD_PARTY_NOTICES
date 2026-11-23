@@ -1,7 +1,17 @@
-This bundle carries the Julia runtime and the system libraries it needs:
-  libjulia, libjulia-internal  Julia, MIT License (https://julialang.org/license)
-  libstdc++, libgcc_s, libatomic  GCC runtime libraries, GPL-3.0 with the GCC Runtime Library Exception
-  libunwind  MIT License
-  libz  zlib License
-  libopenlibm  MIT and BSD-style licenses (https://github.com/JuliaMath/openlibm)
-  libpcre2-8  BSD License (PCRE2)
+This bundle carries the Julia runtime (https://julialang.org/license, MIT) and the
+libraries it ships, built by Julia's BinaryBuilder recipes (https://github.com/JuliaPackaging/Yggdrasil):
+
+  libjulia, libjulia-internal, libopenlibm, libdSFMT, libuv, libblastrampoline   MIT or similar permissive licenses
+  OpenBLAS                            BSD-3-Clause
+  SuiteSparse (AMD, BTF, CAMD, CCOLAMD, COLAMD, KLU, LDL, SuiteSparse_config)   BSD-3-Clause or LGPL-2.1+
+  SuiteSparse (CHOLMOD, SPQR, UMFPACK, RBio)                                      GPL-2.0+ or LGPL-2.1+
+  GMP                                 LGPL-3.0+ or GPL-2.0+
+  MPFR                                LGPL-3.0+
+  PCRE2                               BSD-3-Clause
+  zlib                                zlib License
+  libunwind                           MIT
+  libstdc++, libgcc_s, libatomic, libgomp, libssp, libgfortran, libquadmath
+                                      GPL-3.0 with the GCC Runtime Library Exception
+
+The corresponding source of the GPL and LGPL libraries, at the versions this runtime
+ships, is attached to the same release as <name>-sources-gpl.tar.
