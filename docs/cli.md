@@ -91,6 +91,17 @@ multipliers follow the cnlp sign convention.
 **`key=value`** options go to the solver as written: `tol=1e-8 max_iter=500 print_level=0`
 for Ipopt. A solver refuses an option it does not know, by name.
 
+**Ipopt with HSL.** The bundled Ipopt uses MUMPS. To use an HSL linear solver
+(MA27, MA57, MA86, MA97), bring your own HSL library: Ipopt loads it at run time, so
+nothing needs rebuilding.
+
+```sh
+cnlp solve @lv:wood 100000 linear_solver=ma27 hsllib=/path/to/libhsl.so
+```
+
+HSL is licensed separately: Coin-HSL from STFC (https://licences.stfc.ac.uk/product/coin-hsl,
+free for academic use), or the library of Julia's HSL_jll package.
+
 `cnlp solve` prints the model's size, the status, the objective, the iteration count and the
 time, and exits with 0 when the status is `solved` or `acceptable`, 1 otherwise, and 2 for an
 error before the solve.
