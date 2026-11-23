@@ -276,6 +276,7 @@ int64_t qp_write_json(int64_t id, const char* path, const double* x, const doubl
 
 /* ── the library-level catalogue (optional tier, three lines here) ──────── */
 
+int64_t cnlp_abi_version(void) { return 2; }   /* 0.2 */
 int64_t cnlp_nmodels(void) { return 1; }
 
 int64_t cnlp_model_name(int64_t k, uint8_t* buf, int64_t cap) {

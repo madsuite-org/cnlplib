@@ -79,10 +79,19 @@ jobs:
         run: julia --startup-file=no cnlplib/scripts/check-library.jl "build/${{ inputs.name }}/lib/lib${{ inputs.name }}.so" "${{ inputs.check-size }}"
       - name: Package
         run: cnlplib/scripts/package-library.sh "build/${{ inputs.name }}" "${{ inputs.name }}" "${{ steps.version.outputs.version }}" linux-x86_64 package/LICENSE "${{ inputs.device }}"
+      - name: Load it in a plain C process
+        run: |
+          cc -std=c99 -O2 -o smoke cnlplib/scripts/smoke.c -ldl -lm
+          mkdir unpacked && tar -xzf "${{ inputs.name }}-linux-x86_64.tar.gz" -C unpacked
+          env -i PATH=/usr/bin:/bin ./smoke "unpacked/${{ inputs.name }}/lib/lib${{ inputs.name }}.so" "${{ inputs.check-size }}"
+      - name: Sources of the GPL and LGPL libraries in the runtime
+        run: cnlplib/scripts/gpl-sources.sh "$(sed -n 's/^julia = //p' unpacked/${{ inputs.name }}/VERSION)" . "${{ inputs.name }}"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.name }}-library
-          path: ${{ inputs.name }}-*.tar.gz
+          path: |
+            ${{ inputs.name }}-*.tar.gz
+            ${{ inputs.name }}-sources-gpl.tar
 
   publish:
     needs: build
@@ -105,7 +114,7 @@ jobs:
         run: |
           gh release view "$GITHUB_REF_NAME" -R "$REPO" > /dev/null 2>&1 ||
             gh release create "$GITHUB_REF_NAME" -R "$REPO" --verify-tag --title "$GITHUB_REF_NAME" --notes ""
-          gh release upload "$GITHUB_REF_NAME" -R "$REPO" --clobber dist/*.tar.gz dist/SHA256SUMS
+          gh release upload "$GITHUB_REF_NAME" -R "$REPO" --clobber dist/*.tar.gz dist/*.tar dist/SHA256SUMS
       - name: Nightly release
         if: github.ref_type != 'tag'
         run: |
@@ -118,4 +127,4 @@ jobs:
           else
             gh release create nightly -R "$REPO" --prerelease --title "Nightly" --notes "$notes"
           fi
-          gh release upload nightly -R "$REPO" --clobber dist/*.tar.gz dist/SHA256SUMS
+          gh release upload nightly -R "$REPO" --clobber dist/*.tar.gz dist/*.tar dist/SHA256SUMS

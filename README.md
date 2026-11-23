@@ -9,6 +9,8 @@ cnlp list                                              # available and installed
 cnlp install lv                                        # the latest release, into ~/.cnlplib/lib
 cnlp install lv@nightly                                # or the latest build of the default branch
 cnlp up                                                # update everything installed
+cnlp install ipopt                                     # a solver
+cnlp solve @lv:wood 10000 -o sol.h5                    # solve a model with it
 ```
 
 Installed libraries are found by name by every cnlp consumer, because the installer puts
@@ -57,8 +59,22 @@ and works without the tiers a library does not export.
 - CI validates every entry and publishes the index and the installer to
   `https://cnlplib.madsuite.org/`.
 
-To add a library, open a pull request adding `libraries/<name>.toml`; see
-[libraries/README.md](libraries/README.md).
+To publish a model library, see [docs/models.md](docs/models.md).
+
+## Solvers
+
+`cnlp solve` finds and instantiates a model, applies a warm start (`-s`), calls a solver,
+and writes the solution (`-o`: the model's own format, or the standard HDF5 file). A
+solver implements one small interface, [cnlp_solver.h](cnlp_solver.h), and never sees a
+file or a model format; [solvers/](solvers/) lists the installable ones. Ipopt is the
+reference solver ([adapters/ipopt/](adapters/ipopt/)), and
+[example/solver.c](example/solver.c) is a template. To add a solver, see
+[docs/solvers.md](docs/solvers.md).
+
+```sh
+cnlp solve @emp:acp case118 --solver ipopt tol=1e-8 -o matpower:sol.m
+cnlp solve ./build/libmodels.so:wood 1000 -s previous.h5 -o sol.h5
+```
 
 ## Producers and consumers
 

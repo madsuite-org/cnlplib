@@ -1,0 +1,387 @@
+/* cnlp-solve: solve a model of a cnlp library with a cnlp solver (`cnlp solve`).
+ *
+ *   cnlp solve LIB[:MODEL] [INSTANCE...] [-s START] [-o OUTPUT]... [--solver NAME] [key=value...]
+ *
+ * LIB is @name (an installed library, found on CNLPLIB_PATH and in $CNLPLIB_HOME/lib) or a
+ * path (a library file or bundle directory); MODEL may be left out when the library has one.
+ * INSTANCE is what the model is instantiated from, by its P_argtype: an integer, a file
+ * (a path, `reader:path` for one of the model's readers, or the name of a file in an
+ * installed data set), or one value per builder field. START is `reader:path` or a
+ * cnlp-solution file; OUTPUT is `writer:path`, or a path written with the model's default
+ * writer, else as a cnlp-solution HDF5 file. key=value options go to the solver.
+ *
+ *   cc -std=c99 -O2 -I.. -o cnlp-solve cnlp-solve.c -ldl -lhdf5
+ */
+#define _GNU_SOURCE
+#include <dirent.h>
+#include <dlfcn.h>
+#include <errno.h>
+#include <hdf5.h>
+#include <limits.h>
+#include <math.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <time.h>
+#include "cnlp_solver.h"
+
+static void die(const char* fmt, ...) {
+    va_list ap; va_start(ap, fmt);
+    fputs("cnlp solve: ", stderr); vfprintf(stderr, fmt, ap); fputc('\n', stderr);
+    va_end(ap); exit(2);
+}
+static int isfile(const char* p) { struct stat s; return stat(p, &s) == 0 && S_ISREG(s.st_mode); }
+static int isdir(const char* p) { struct stat s; return stat(p, &s) == 0 && S_ISDIR(s.st_mode); }
+static const char* home_dir(void) {
+    static char h[PATH_MAX];
+    const char* e = getenv("CNLPLIB_HOME");
+    if (e && *e) return e;
+    snprintf(h, sizeof h, "%s/.cnlplib", getenv("HOME") ? getenv("HOME") : ".");
+    return h;
+}
+
+/* ── the model library ─────────────────────────────────────────────────────────── */
+
+static void* LIB;
+static char PRE[128];
+static void* sym(const char* s) {
+    char n[256]; snprintf(n, sizeof n, "%s_%s", PRE, s);
+    return dlsym(LIB, n);
+}
+static void* need(const char* s) {
+    void* f = sym(s);
+    if (!f) die("`%s` has no %s_%s", PRE, PRE, s);
+    return f;
+}
+/* a copy-out string (`P_name(buf, cap) -> length`), or "" */
+static char* copyout(int64_t (*f)(uint8_t*, int64_t)) {
+    static char b[4096];
+    int64_t n = f ? f((uint8_t*)b, sizeof b - 1) : 0;
+    b[n < 0 ? 0 : (n < (int64_t)sizeof b - 1 ? n : (int64_t)sizeof b - 1)] = 0;
+    return b;
+}
+
+/* @name or a path -> the library file */
+static void resolve_lib(const char* spec, char* out) {
+    if (spec[0] == '@') {
+        const char* name = spec + 1;
+        char dirs[8192]; const char* e = getenv("CNLPLIB_PATH");
+        snprintf(dirs, sizeof dirs, "%s%s%s/lib", e && *e ? e : "", e && *e ? ":" : "", home_dir());
+        for (char* d = strtok(dirs, ":"); d; d = strtok(NULL, ":")) {
+            const char* pats[] = { "%s/%s/lib/lib%s.so", "%s/lib%s.so", "%s/lib/lib%s.so" };
+            for (int k = 0; k < 3; k++) {
+                if (k == 0) snprintf(out, PATH_MAX, pats[0], d, name, name);
+                else snprintf(out, PATH_MAX, pats[k], d, name);
+                if (isfile(out)) return;
+            }
+        }
+        die("no installed library `%s` (see: cnlp list; install with: cnlp install %s)", name, name);
+    }
+    if (isfile(spec)) { snprintf(out, PATH_MAX, "%s", spec); return; }
+    if (isdir(spec)) {
+        char b[PATH_MAX]; snprintf(b, sizeof b, "%s", spec);
+        size_t L = strlen(b); while (L > 1 && b[L - 1] == '/') b[--L] = 0;
+        const char* base = strrchr(b, '/') ? strrchr(b, '/') + 1 : b;
+        snprintf(out, PATH_MAX, "%s/lib/lib%s.so", b, base);
+        if (isfile(out)) return;
+    }
+    die("no library at `%s`", spec);
+}
+
+/* ── data files: a path, or a file in an installed data set ─────────────────────── */
+
+static int find_in(const char* dir, const char* want, char* out, int depth) {
+    DIR* d = opendir(dir); if (!d) return 0;
+    struct dirent* e; int found = 0;
+    char p[PATH_MAX];
+    while (!found && (e = readdir(d))) {
+        if (e->d_name[0] == '.') continue;
+        snprintf(p, sizeof p, "%s/%s", dir, e->d_name);
+        if (isdir(p)) { if (depth < 6) found = find_in(p, want, out, depth + 1); continue; }
+        char stem[NAME_MAX + 1]; snprintf(stem, sizeof stem, "%s", e->d_name);
+        char* dot = strrchr(stem, '.'); if (dot) *dot = 0;
+        size_t ls = strlen(stem), lw = strlen(want);
+        if (!strcmp(e->d_name, want) || !strcmp(stem, want) ||
+            (ls > lw && stem[ls - lw - 1] == '_' && !strcmp(stem + ls - lw, want))) {
+            snprintf(out, PATH_MAX, "%s", p); found = 1;
+        }
+    }
+    closedir(d); return found;
+}
+static const char* resolve_file(const char* a) {
+    static char p[PATH_MAX];
+    if (isfile(a) || strchr(a, '/')) return a;
+    char d[PATH_MAX]; snprintf(d, sizeof d, "%s/data", home_dir());
+    return find_in(d, a, p, 0) ? p : a;
+}
+
+/* `name:rest` where name is one of the model's readers or writers of `kind`, else NULL */
+static int has_reader(const char* name, int64_t kind) {
+    int64_t (*nr)(void) = sym("nreaders");
+    int64_t (*rn)(int64_t, uint8_t*, int64_t) = sym("reader_name");
+    int64_t (*rk)(int64_t) = sym("reader_kind");
+    if (!nr || !rn || !rk) return 0;
+    for (int64_t k = 0; k < nr(); k++) {
+        char b[256]; int64_t n = rn(k, (uint8_t*)b, sizeof b - 1); b[n > 0 ? n : 0] = 0;
+        if (!strcmp(b, name) && rk(k) == kind) return 1;
+    }
+    return 0;
+}
+static int has_writer(int64_t id, const char* name) {
+    int64_t (*nw)(void) = sym("nwriters");
+    int64_t (*wn)(int64_t, uint8_t*, int64_t) = sym("writer_name");
+    if (!nw || !wn) return 0;
+    for (int64_t k = 0; k < nw(); k++) {
+        char b[256]; int64_t n = wn(k, (uint8_t*)b, sizeof b - 1); b[n > 0 ? n : 0] = 0;
+        if (!strcmp(b, name)) return 1;
+    }
+    (void)id; return 0;
+}
+static char* split_prefix(const char* s, char* name) {
+    const char* c = strchr(s, ':');
+    if (!c || c == s || (size_t)(c - s) >= 128) return NULL;
+    memcpy(name, s, c - s); name[c - s] = 0;
+    return (char*)c + 1;
+}
+
+/* ── instantiation ────────────────────────────────────────────────────────────── */
+
+static int64_t instantiate(int nargs, char** args) {
+    char spec[4096]; snprintf(spec, sizeof spec, "%s", copyout(need("argtype")));
+    int items = spec[0] ? 1 : 0;
+    for (char* c = spec; *c; c++) items += *c == ',';
+    char rd[128]; const char* rest;
+    if (nargs == 1 && (rest = split_prefix(args[0], rd)) && has_reader(rd, 0)) {
+        char f[256]; snprintf(f, sizeof f, "new_from_%s", rd);
+        int64_t (*nf)(const char*) = need(f);
+        return nf(resolve_file(rest));
+    }
+    if (items == 0) {
+        if (nargs) die("`%s` is a fixed model: it takes no instance arguments", PRE);
+        int64_t (*nw)(int64_t) = need("new"); return nw(0);
+    }
+    if (nargs != items) die("`%s` takes %d instance argument%s (%s), got %d", PRE, items, items == 1 ? "" : "s", spec, nargs);
+    if (items == 1 && !strncmp(spec, "int|", 4) && sym("new")) {
+        char* end; long long n = strtoll(args[0], &end, 10);
+        if (*end) die("`%s` takes an integer (%s), got `%s`", PRE, spec + 4, args[0]);
+        int64_t (*nw)(int64_t) = need("new"); return nw(n);
+    }
+    if (items == 1 && !strncmp(spec, "string|", 7)) {
+        int64_t (*ns)(const char*) = need("new_str"); return ns(resolve_file(args[0]));
+    }
+    /* the builder, for scalar fields: names from P_schema, in order */
+    char* schema = copyout(need("schema"));
+    int64_t (*begin)(void) = need("data_begin");
+    int64_t (*si)(int64_t, const char*, int64_t) = need("set_scalar_i64");
+    int64_t (*sf)(int64_t, const char*, double) = need("set_scalar_f64");
+    int64_t b = begin();
+    char* q = schema; char* item = strtok(spec, ",");
+    for (int k = 0; k < nargs; k++, item = strtok(NULL, ",")) {
+        q = strstr(q, "\"name\""); if (!q) die("cannot read the schema of `%s`", PRE);
+        q = strchr(q + 6, '"') + 1; char field[256]; size_t L = strcspn(q, "\"");
+        memcpy(field, q, L); field[L] = 0; q += L;
+        char* end;
+        if (!strncmp(item, "int|", 4)) {
+            long long v = strtoll(args[k], &end, 10);
+            if (*end) die("field `%s` of `%s` takes an integer, got `%s`", field, PRE, args[k]);
+            if (si(b, field, v)) die("`%s` refused %s = %s", PRE, field, args[k]);
+        } else if (!strncmp(item, "f64|", 4)) {
+            double v = strtod(args[k], &end);
+            if (*end) die("field `%s` of `%s` takes a number, got `%s`", field, PRE, args[k]);
+            if (sf(b, field, v)) die("`%s` refused %s = %s", PRE, field, args[k]);
+        } else die("field `%s` of `%s` (%s) cannot be given on the command line", field, PRE, item);
+    }
+    int64_t (*ready)(int64_t) = need("data_ready"); int64_t (*nfd)(int64_t) = need("new_from_data");
+    if (ready(b) != 1) die("the instance data of `%s` is incomplete", PRE);
+    return nfd(b);
+}
+
+/* ── the problem handed to the solver ─────────────────────────────────────────── */
+
+typedef struct { int64_t id; void *obj, *grad, *cons, *js, *jac, *hs, *hess; } instance;
+typedef int64_t (*ev)(int64_t, const double*, double*);
+typedef int64_t (*st)(int64_t, int64_t*, int64_t*);
+typedef int64_t (*hv)(int64_t, const double*, const double*, double, double*);
+static int64_t m_obj(void* c, const double* x, double* f) { instance* m = c; return ((ev)m->obj)(m->id, x, f); }
+static int64_t m_grad(void* c, const double* x, double* g) { instance* m = c; return ((ev)m->grad)(m->id, x, g); }
+static int64_t m_cons(void* c, const double* x, double* v) { instance* m = c; return ((ev)m->cons)(m->id, x, v); }
+static int64_t m_js(void* c, int64_t* r, int64_t* k) { instance* m = c; return ((st)m->js)(m->id, r, k); }
+static int64_t m_jac(void* c, const double* x, double* v) { instance* m = c; return ((ev)m->jac)(m->id, x, v); }
+static int64_t m_hs(void* c, int64_t* r, int64_t* k) { instance* m = c; return ((st)m->hs)(m->id, r, k); }
+static int64_t m_hess(void* c, const double* x, const double* y, double w, double* v) {
+    instance* m = c; return ((hv)m->hess)(m->id, x, y, w, v);
+}
+
+/* ── cnlp-solution HDF5 (formats/solution.md) ─────────────────────────────────── */
+
+static void attr_str(hid_t o, const char* k, const char* v) {
+    hid_t t = H5Tcopy(H5T_C_S1); H5Tset_size(t, strlen(v) ? strlen(v) : 1);
+    hid_t s = H5Screate(H5S_SCALAR), a = H5Acreate2(o, k, t, s, H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(a, t, v); H5Aclose(a); H5Sclose(s); H5Tclose(t);
+}
+static void attr_i64(hid_t o, const char* k, int64_t v) {
+    hid_t s = H5Screate(H5S_SCALAR), a = H5Acreate2(o, k, H5T_STD_I64LE, s, H5P_DEFAULT, H5P_DEFAULT);
+    H5Awrite(a, H5T_NATIVE_INT64, &v); H5Aclose(a); H5Sclose(s);
+}
+static void ds(hid_t g, const char* k, hid_t ft, hid_t mt, int64_t n, const void* v) {
+    hsize_t d = (hsize_t)n;
+    hid_t s = n < 0 ? H5Screate(H5S_SCALAR) : H5Screate_simple(1, &d, NULL);
+    hid_t x = H5Dcreate2(g, k, ft, s, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    H5Dwrite(x, mt, H5S_ALL, H5S_ALL, H5P_DEFAULT, v); H5Dclose(x); H5Sclose(s);
+}
+static void ds_str(hid_t g, const char* k, const char* v) {
+    hid_t t = H5Tcopy(H5T_C_S1); H5Tset_size(t, strlen(v) ? strlen(v) : 1);
+    ds(g, k, t, t, -1, v); H5Tclose(t);
+}
+static const char* STATUS[] = { "solved", "acceptable", "infeasible", "unbounded", "iteration_limit", "time_limit", "error" };
+static void write_h5(const char* path, const char* lib, int64_t n, int64_t m, int minimize, const cnlp_result* r,
+                     const char* solver) {
+    hid_t f = H5Fcreate(path, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+    if (f < 0) die("cannot write %s", path);
+    attr_str(f, "format", "cnlp-solution"); attr_str(f, "format_version", "0.2");
+    attr_str(f, "library", lib); attr_str(f, "model", PRE);
+    attr_i64(f, "nvar", n); attr_i64(f, "ncon", m);
+    hid_t g = H5Gcreate2(f, "solution", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    ds(g, "solution", H5T_IEEE_F64LE, H5T_NATIVE_DOUBLE, n, r->x);
+    ds(g, "multipliers", H5T_IEEE_F64LE, H5T_NATIVE_DOUBLE, m, r->y);
+    ds(g, "multipliers_L", H5T_IEEE_F64LE, H5T_NATIVE_DOUBLE, n, r->zl);
+    ds(g, "multipliers_U", H5T_IEEE_F64LE, H5T_NATIVE_DOUBLE, n, r->zu);
+    ds(g, "objective", H5T_IEEE_F64LE, H5T_NATIVE_DOUBLE, -1, &r->objective);
+    int8_t mn = (int8_t)minimize; ds(g, "minimize", H5T_STD_I8LE, H5T_NATIVE_INT8, -1, &mn);
+    ds_str(g, "status", STATUS[r->status >= 0 && r->status <= 6 ? r->status : 6]);
+    int64_t it = r->iterations; ds(g, "iterations", H5T_STD_I64LE, H5T_NATIVE_INT64, -1, &it);
+    ds_str(g, "solver", solver); ds_str(g, "solver_status", r->solver_status);
+    H5Gclose(g); H5Fclose(f);
+}
+static int read_h5(const char* path, int64_t n, int64_t m, double* x, double* y, double* zl, double* zu) {
+    hid_t f = H5Fopen(path, H5F_ACC_RDONLY, H5P_DEFAULT);
+    if (f < 0) return 0;
+    const char* k[] = { "solution/solution", "solution/multipliers", "solution/multipliers_L", "solution/multipliers_U" };
+    double* v[] = { x, y, zl, zu }; int64_t L[] = { n, m, n, n };
+    for (int i = 0; i < 4; i++) {
+        hid_t d = H5Dopen2(f, k[i], H5P_DEFAULT);
+        if (d < 0) { H5Fclose(f); die("%s has no %s", path, k[i]); }
+        hid_t s = H5Dget_space(d); hssize_t c = H5Sget_simple_extent_npoints(s); H5Sclose(s);
+        if (c != L[i]) { H5Dclose(d); H5Fclose(f); die("%s: %s has %lld entries, the model needs %lld", path, k[i], (long long)c, (long long)L[i]); }
+        H5Dread(d, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, v[i]); H5Dclose(d);
+    }
+    H5Fclose(f); return 1;
+}
+
+/* ── the solver ───────────────────────────────────────────────────────────────── */
+
+static void* load_solver(const char* s, char* path) {
+    if (strchr(s, '/')) snprintf(path, PATH_MAX, "%s", s);
+    else {
+        snprintf(path, PATH_MAX, "%s/solvers/%s/lib/libcnlp_%s.so", home_dir(), s, s);
+        if (!isfile(path)) die("no solver `%s` (install one with: cnlp install %s)", s, s);
+    }
+    void* h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    if (!h) die("cannot load the solver %s: %s", path, dlerror());
+    int64_t (*ver)(void) = dlsym(h, "cnlp_solver_version");
+    if (!ver || ver() / 1000 != CNLP_SOLVER_VERSION / 1000) die("%s is not a cnlp solver of interface %d.x", path, CNLP_SOLVER_VERSION / 1000);
+    return h;
+}
+
+static void usage(void) {
+    puts("usage: cnlp solve LIB[:MODEL] [INSTANCE...] [-s START] [-o OUTPUT]... [--solver NAME] [key=value...]\n"
+         "  LIB      @name (installed) or a path      MODEL   left out when the library has one\n"
+         "  INSTANCE an integer, a file (path, reader:path, or a data-set file name), or builder values\n"
+         "  START    reader:path or a cnlp-solution file\n"
+         "  OUTPUT   writer:path, or a path (the model's default writer, else cnlp-solution HDF5)\n"
+         "  --solver ipopt (default) or a path to a cnlp solver library; key=value options go to it");
+}
+
+int main(int argc, char** argv) {
+    if (argc < 2 || !strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) { usage(); return argc < 2; }
+    const char *libspec = NULL, *start = NULL, *solver = "ipopt";
+    char *pos[64], *outs[16], *keys[128], *vals[128]; int npos = 0, nout = 0, nopt = 0;
+    for (int i = 1; i < argc; i++) {
+        char* a = argv[i];
+        if (!strcmp(a, "-s") || !strcmp(a, "--start")) { if (++i == argc) die("%s needs a value", a); start = argv[i]; }
+        else if (!strcmp(a, "-o") || !strcmp(a, "--output")) { if (++i == argc) die("%s needs a value", a); if (nout < 16) outs[nout++] = argv[i]; }
+        else if (!strcmp(a, "--solver")) { if (++i == argc) die("--solver needs a value"); solver = argv[i]; }
+        else if (a[0] == '-' && a[1]) die("unknown option %s (see: cnlp solve --help)", a);
+        else if (!libspec) libspec = a;
+        else if (strchr(a, '=') && a[0] != '=') { char* e = strchr(a, '='); *e = 0; keys[nopt] = a; vals[nopt++] = e + 1; }
+        else if (npos < 64) pos[npos++] = a;
+    }
+    /* LIB[:MODEL], split at the last colon when what follows names no path */
+    char spec[PATH_MAX], model[128] = "", lib[PATH_MAX];
+    snprintf(spec, sizeof spec, "%s", libspec);
+    char* c = strrchr(spec, ':');
+    if (c && !strchr(c, '/')) { snprintf(model, sizeof model, "%s", c + 1); *c = 0; }
+    resolve_lib(spec, lib);
+    LIB = dlopen(lib, RTLD_NOW | RTLD_LOCAL);
+    if (!LIB) die("cannot load %s: %s", lib, dlerror());
+    int64_t (*abi)(void) = dlsym(LIB, "cnlp_abi_version");
+    if (!abi || abi() != 2) die("%s is not a cnlp 0.2 library", lib);
+    int64_t (*nm)(void) = dlsym(LIB, "cnlp_nmodels");
+    int64_t (*mn)(int64_t, uint8_t*, int64_t) = dlsym(LIB, "cnlp_model_name");
+    if (!model[0]) {
+        if (!nm || !mn || nm() != 1) die("%s has several models; give one as LIB:MODEL", spec);
+        int64_t L = mn(0, (uint8_t*)model, sizeof model - 1); model[L > 0 ? L : 0] = 0;
+    }
+    snprintf(PRE, sizeof PRE, "%s", model);
+    if (!sym("nvar")) die("%s has no model `%s`", spec, model);
+
+    int64_t id = instantiate(npos, pos);
+    if (id <= 0) die("`%s` could not be instantiated from the given arguments", PRE);
+    instance M = { id, need("obj"), need("grad"), need("cons"), need("jac_structure"), need("jac"),
+                need("hess_structure"), need("hess") };
+    int64_t n = ((int64_t (*)(int64_t))need("nvar"))(id), m = ((int64_t (*)(int64_t))need("ncon"))(id);
+    int64_t nj = ((int64_t (*)(int64_t))need("nnzj"))(id), nh = ((int64_t (*)(int64_t))need("nnzh"))(id);
+    int64_t (*mini)(int64_t) = sym("minimize");
+    int minimize = mini ? mini(id) != 0 : 1;
+    double *x0 = calloc(n + 1, 8), *lv = calloc(n + 1, 8), *uv = calloc(n + 1, 8), *lc = calloc(m + 1, 8), *uc = calloc(m + 1, 8);
+    if (((int64_t (*)(int64_t, double*, double*, double*, double*, double*))need("meta"))(id, x0, lv, uv, lc, uc))
+        die("%s_meta failed", PRE);
+    double *y0 = NULL, *zl0 = NULL, *zu0 = NULL;
+    if (start) {
+        y0 = calloc(m + 1, 8); zl0 = calloc(n + 1, 8); zu0 = calloc(n + 1, 8);
+        char rd[128]; const char* rest = split_prefix(start, rd);
+        if (rest && has_reader(rd, 2)) {
+            char f[256]; snprintf(f, sizeof f, "start_from_%s", rd);
+            int64_t (*sf)(int64_t, const char*, double*, double*, double*, double*) = need(f);
+            if (sf(id, resolve_file(rest), x0, y0, zl0, zu0)) die("reader `%s` could not read %s", rd, rest);
+        } else if (!read_h5(start, n, m, x0, y0, zl0, zu0)) die("cannot read the start %s", start);
+    }
+    cnlp_problem P = { &M, n, m, nj, nh, minimize, x0, lv, uv, lc, uc, y0, zl0, zu0,
+                       m_obj, m_grad, m_cons, m_js, m_jac, m_hs, m_hess };
+    cnlp_result R = { calloc(n + 1, 8), calloc(m + 1, 8), calloc(n + 1, 8), calloc(n + 1, 8), 0, CNLP_ERROR, -1, "" };
+
+    char spath[PATH_MAX]; void* sh = load_solver(solver, spath);
+    int64_t (*solve)(const cnlp_problem*, int64_t, const char* const*, const char* const*, cnlp_result*) = dlsym(sh, "cnlp_solve");
+    char sname[64]; int64_t (*sn)(uint8_t*, int64_t) = dlsym(sh, "cnlp_solver_name");
+    int64_t L = sn ? sn((uint8_t*)sname, sizeof sname - 1) : 0; sname[L > 0 ? L : 0] = 0;
+    struct timespec t0, t1; clock_gettime(CLOCK_MONOTONIC, &t0);
+    int64_t rc = solve(&P, nopt, (const char* const*)keys, (const char* const*)vals, &R);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    if (rc == 1) die("%s", R.solver_status);
+    if (rc) die("the solver failed: %s", R.solver_status);
+    double secs = (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec);
+    printf("%s:%s  nvar %lld  ncon %lld\n%s  objective %.15g  iterations %lld  %.3f s  (%s)\n", spec, PRE,
+           (long long)n, (long long)m, STATUS[R.status >= 0 && R.status <= 6 ? R.status : 6], R.objective,
+           (long long)R.iterations, secs, R.solver_status);
+
+    for (int k = 0; k < nout; k++) {
+        char wr[128] = ""; const char* path = outs[k]; const char* rest = split_prefix(outs[k], wr);
+        if (rest && strcmp(wr, "cnlp") && has_writer(id, wr)) path = rest;
+        else if (rest && !strcmp(wr, "cnlp")) { path = rest; wr[0] = 0; }
+        else {
+            wr[0] = 0;
+            int64_t (*dw)(int64_t, uint8_t*, int64_t) = sym("default_writer");
+            if (dw) { int64_t l = dw(id, (uint8_t*)wr, sizeof wr - 1); wr[l > 0 ? l : 0] = 0; }
+        }
+        if (wr[0]) {
+            char f[256]; snprintf(f, sizeof f, "write_%s", wr);
+            int64_t (*w)(int64_t, const char*, const double*, const double*, const double*, const double*, double, const char*) = need(f);
+            if (w(id, path, R.x, R.y, R.zl, R.zu, R.objective, STATUS[R.status])) die("writer `%s` could not write %s", wr, path);
+        } else write_h5(path, lib, n, m, minimize, &R, sname);
+        printf("wrote %s%s%s\n", path, wr[0] ? " with " : "", wr);
+    }
+    return R.status <= CNLP_ACCEPTABLE ? 0 : 1;
+}
