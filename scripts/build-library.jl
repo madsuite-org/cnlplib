@@ -13,10 +13,12 @@ out = joinpath(abspath(ARGS[3]), name)
 device = length(ARGS) >= 4 ? Symbol(ARGS[4]) : :cpu
 
 Pkg.activate(; temp = true)
+Pkg.Registry.update()   # a runner's registry copy can lag a fresh registration
 pkgname = Pkg.TOML.parsefile(joinpath(pkgdir_, "Project.toml"))["name"]
 rev = get(ENV, "EXAMODELSCOMPILER_REV", "")
 Pkg.develop(Pkg.PackageSpec(path = abspath(pkgdir_)))   # the checkout as it is, not its last commit
-specs = [isempty(rev) ? Pkg.PackageSpec(name = "ExaModelsCompiler") :
+# 0.4 writes cnlp ABI 0.2 and has the device tier; never fall back to an older one
+specs = [isempty(rev) ? Pkg.PackageSpec(name = "ExaModelsCompiler", version = "0.4") :
              Pkg.PackageSpec(url = "https://github.com/madsuite-org/ExaModels.jl",
                              subdir = "ExaModelsCompiler", rev = rev),
          # TimerOutputs 1 loads PrettyTables 3, which loads REPL, which `juliac --trim`
