@@ -4,7 +4,8 @@
 #   cnlplib list               available libraries for this platform, and what is installed
 #   cnlplib install NAME...    install or update libraries (into $CNLPLIB_HOME/lib/NAME) or
 #                             data sets (into $CNLPLIB_HOME/data/NAME); a library brings
-#                             the data sets it needs
+#                             the data sets it needs; NAME@nightly installs the
+#                             library's rolling build of its default branch
 #   cnlplib up                 update everything installed to the newest version
 #   cnlplib remove NAME...     remove installed libraries or data sets
 #   cnlplib path               print the library directory (for CNLPMODELS_PATH)
@@ -78,10 +79,17 @@ install_one() {
     ver="$(printf '%s' "$line" | cut -f2)"; url="$(printf '%s' "$line" | cut -f4)"; want="$(printf '%s' "$line" | cut -f5)"
     kind="$(printf '%s' "$line" | cut -f7)"
     dest="$LIBDIR"; [ "$kind" = data ] && dest="$DATADIR"
-    if [ "$(installed_version "$1")" = "$ver" ]; then echo "$1 $ver is up to date"; return; fi
-    echo "Installing $1 $ver"
+    n="${1%@nightly}"   # NAME@nightly installs as NAME
+    if [ "$want" = "-" ]; then
+        # a rolling build: its checksum is in the SHA256SUMS published next to it
+        want="$(curl -fsSL "${url%/*}/SHA256SUMS" | awk -v f="${url##*/}" '$2 == f || $2 == "*" f { print $1 }')"
+        [ -n "$want" ] || die "no checksum for ${url##*/} in ${url%/*}/SHA256SUMS"
+        ver="nightly $want"
+    fi
+    if [ "$(installed_version "$n")" = "$ver" ]; then echo "$1 is up to date"; return; fi
+    echo "Installing $1 ${ver%% *}"
     mkdir -p "$dest"
-    stage="$(mktemp -d "$dest/.stage-$1.XXXXXX")"
+    stage="$(mktemp -d "$dest/.stage-$n.XXXXXX")"
     trap 'rm -rf "$stage"' EXIT INT TERM
     curl -fSL --progress-bar "$url" -o "$stage/asset.tar.gz" || die "download failed: $url"
     got="$(sha256 "$stage/asset.tar.gz")"
@@ -90,15 +98,15 @@ install_one() {
     # the asset's content, or its single top-level directory
     src="$stage/x"
     if [ "$(ls -A "$src" | wc -l)" -eq 1 ] && [ -d "$src/$(ls -A "$src")" ]; then src="$src/$(ls -A "$src")"; fi
-    [ "$kind" = data ] || ls "$src/lib/lib$1".* >/dev/null 2>&1 || die "the asset for $1 has no lib/lib$1.<ext>"
+    [ "$kind" = data ] || ls "$src/lib/lib$n".* >/dev/null 2>&1 || die "the asset for $1 has no lib/lib$n.<ext>"
     echo "$ver" > "$src/.cnlplib-version"
     # swap into place: a failed install never leaves a half-installed library
-    rm -rf "$dest/.old-$1"
-    [ -d "$dest/$1" ] && mv "$dest/$1" "$dest/.old-$1"
-    mv "$src" "$dest/$1"
-    rm -rf "$dest/.old-$1" "$stage"
+    rm -rf "$dest/.old-$n"
+    [ -d "$dest/$n" ] && mv "$dest/$n" "$dest/.old-$n"
+    mv "$src" "$dest/$n"
+    rm -rf "$dest/.old-$n" "$stage"
     trap - EXIT INT TERM
-    echo "Installed $1 $ver in $dest/$1"
+    echo "Installed $1 ${ver%% *} in $dest/$n"
 }
 
 cmd_install() {
@@ -112,7 +120,13 @@ cmd_up() {
     names=""
     for dir in "$LIBDIR" "$DATADIR"; do
         [ -d "$dir" ] || continue
-        for d in "$dir"/*/; do [ -d "$d" ] && names="$names $(basename "$d")"; done
+        for d in "$dir"/*/; do
+            [ -d "$d" ] || continue
+            n="$(basename "$d")"
+            # a nightly install stays on nightly
+            case "$(cat "$d/.cnlplib-version" 2>/dev/null)" in nightly*) n="$n@nightly" ;; esac
+            names="$names $n"
+        done
     done
     [ -n "$names" ] || { echo "nothing installed"; return; }
     # shellcheck disable=SC2086

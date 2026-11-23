@@ -28,3 +28,18 @@ library bundle: `lib/lib<name>.<ext>`, its runtime, `LICENSE`, `THIRD_PARTY_NOTI
 
 CI rejects an entry whose fields are missing or malformed, whose name differs from its
 file name, or whose platforms are not `<os>-<arch>` with os in linux, macos, windows.
+
+A library may also publish a rolling build of its default branch, installed with
+`cnlplib install <name>@nightly`. Its assets are replaced on every build, so they carry no
+checksum here; the installer checks them against the `SHA256SUMS` published next to them.
+
+```toml
+[nightly]
+cnlp_abi = "0.2"
+device   = ["cuda"]
+[nightly.assets]
+"linux-x86_64" = { url = "https://github.com/…/releases/download/nightly/lv-nightly-linux-x86_64.tar.gz" }
+```
+
+Model packages build and publish both kinds of release with the reusable workflow
+[`.github/workflows/library.yml`](../.github/workflows/library.yml).

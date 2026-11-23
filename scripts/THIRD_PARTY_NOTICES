@@ -1,0 +1,7 @@
+This bundle carries the Julia runtime and the system libraries it needs:
+  libjulia, libjulia-internal  Julia, MIT License (https://julialang.org/license)
+  libstdc++, libgcc_s, libatomic  GCC runtime libraries, GPL-3.0 with the GCC Runtime Library Exception
+  libunwind  MIT License
+  libz  zlib License
+  libopenlibm  MIT and BSD-style licenses (https://github.com/JuliaMath/openlibm)
+  libpcre2-8  BSD License (PCRE2)

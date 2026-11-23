@@ -4,7 +4,9 @@ into site/.
 
 index.tsv has one line per library and platform, and one per data set, for the newest
 version: name, version, platform, url, sha256, description, kind, requires
-(tab-separated). Data sets have platform `any` and kind `data`; `requires` lists the data
+(tab-separated). A library's rolling `[nightly]` build adds lines named `<name>@nightly`,
+version `nightly` and sha256 `-`: the installer checks those against the `SHA256SUMS`
+published next to the asset. Data sets have platform `any` and kind `data`; `requires` lists the data
 sets a library needs (comma-separated). The installer reads it with plain shell tools.
 """
 import json, os, re, sys, tomllib
@@ -28,8 +30,17 @@ def check(path):
         errs.append(f"`name` is {e['name']!r} but the file is {stem}.toml")
     if not NAME.match(e["name"]):
         errs.append("`name` must be lowercase [a-z0-9_]")
-    if not e["versions"]:
-        errs.append("`versions` is empty")
+    if not e["versions"] and "nightly" not in e:
+        errs.append("`versions` is empty and there is no `[nightly]`")
+    if "nightly" in e:
+        n = e["nightly"]
+        if "cnlp_abi" not in n or not n.get("assets"):
+            errs.append("`[nightly]` needs `cnlp_abi` and `assets`")
+        for plat, a in n.get("assets", {}).items():
+            if not PLATFORM.match(plat):
+                errs.append(f"nightly: platform {plat!r} is not <os>-<arch>")
+            if not str(a.get("url", "")).startswith("https://"):
+                errs.append(f"nightly {plat}: url must be https")
     for v in e["versions"]:
         for k in ("version", "cnlp_abi", "assets"):
             if k not in v:
@@ -92,11 +103,14 @@ def main():
         json.dump({"format": "cnlplib-index", "format_version": "1", "libraries": entries, "data": data}, f, indent=1)
     with open(os.path.join(site, "index.tsv"), "w") as f:
         for e in entries:
-            v = e["versions"][-1]
-            for plat, a in sorted(v["assets"].items()):
-                desc = e["description"].replace("\t", " ")
-                req = ",".join(e.get("data", []))
-                f.write(f"{e['name']}\t{v['version']}\t{plat}\t{a['url']}\t{a['sha256']}\t{desc}\tlib\t{req}\n")
+            desc = e["description"].replace("\t", " ")
+            req = ",".join(e.get("data", []))
+            if e["versions"]:
+                v = e["versions"][-1]
+                for plat, a in sorted(v["assets"].items()):
+                    f.write(f"{e['name']}\t{v['version']}\t{plat}\t{a['url']}\t{a['sha256']}\t{desc}\tlib\t{req}\n")
+            for plat, a in sorted(e.get("nightly", {}).get("assets", {}).items()):
+                f.write(f"{e['name']}@nightly\tnightly\t{plat}\t{a['url']}\t-\t{desc}\tlib\t{req}\n")
         for e in data:
             v = e["versions"][-1]
             desc = e["description"].replace("\t", " ")
