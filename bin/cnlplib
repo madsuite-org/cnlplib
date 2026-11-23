@@ -101,7 +101,12 @@ install_one() {
         want="$(curl -fsSL "${url%/*}/SHA256SUMS" 2>/dev/null | awk -v f="${url##*/}" '$2 == f || $2 == "*" f { print $1 }')"
         [ -n "$want" ] || die "no checksum for ${url##*/} in ${url%/*}/SHA256SUMS (is '$req' released?)"
     fi
-    if [ "$(installed "$n" | cut -d' ' -f2)" = "$want" ]; then echo "$req is up to date"; return; fi
+    cur="$(installed "$n")"
+    if [ "$(printf '%s' "$cur" | cut -d' ' -f2)" = "$want" ]; then
+        # same bytes: record the request, so `up` follows the channel asked for last
+        f="$dest/$n/.cnlplib-version"; echo "${cur%% *} $want $req" > "$f"
+        echo "$req is up to date"; return
+    fi
     echo "Installing $req"
     mkdir -p "$dest"
     stage="$(mktemp -d "$dest/.stage-$n.XXXXXX")"
