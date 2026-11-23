@@ -84,7 +84,7 @@ Then try real models: `cnlp solve @lv:wood 10000 --solver ./libcnlp_mysolver.so`
 `--solver` takes a path, so a solver works as soon as it is built:
 
 ```sh
-cnlp solve @emp:acp case118 --solver ./libcnlp_mysolver.so tol=1e-8 -o sol.m
+cnlp solve @emp:acp case118_ieee --solver ./libcnlp_mysolver.so tol=1e-8 -o sol.m
 ```
 
 ## 5. Packing, releasing and registering
@@ -113,7 +113,11 @@ nightly          = true
 rolling          = true                     # only the nightly release: `cnlp install ipopt` takes it
 platforms        = ["linux-x86_64"]
 solver_interface = "0.1"
+backends         = ["cpu"]                  # where it evaluates the model: cpu, cuda, rocm, oneapi, metal
 ```
 
 `cnlp install <name>` then puts it in `~/.cnlplib/solvers/<name>`, and
-`cnlp solve ... --solver <name>` uses it.
+`cnlp solve ... --solver <name>` uses it. `cnlp list` and the registry page show each
+solver's backends. Interface 0.1 passes host callbacks, so a solver states `cpu`; a GPU
+solver needs the model's device callbacks (`P_*_d`), which the next version of the
+interface will carry.

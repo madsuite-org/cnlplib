@@ -72,7 +72,7 @@ reference solver ([adapters/ipopt/](adapters/ipopt/)), and
 [docs/solvers.md](docs/solvers.md).
 
 ```sh
-cnlp solve @emp:acp case118 --solver ipopt tol=1e-8 -o matpower:sol.m
+cnlp solve @emp:acp case118_ieee --solver ipopt tol=1e-8 -o matpower:sol.m
 cnlp solve ./build/libmodels.so:wood 1000 -s previous.h5 -o sol.h5
 ```
 

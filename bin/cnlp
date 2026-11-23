@@ -48,7 +48,7 @@ fetch_index() {
     curl -fsSL "$CNLPLIB_INDEX" -o "$INDEX" || die "could not download the index from $CNLPLIB_INDEX"
 }
 
-# name label platform url sha256 description kind requires versioned-url, for this platform
+# name label platform url sha256 description kind requires versioned-url backends, for this platform
 # (sha256 `-`: in the SHA256SUMS next to the asset; versioned-url has `{version}`)
 lookup() { awk -F'\t' -v n="$1" -v p="$PLAT" '$1 == n && ($3 == p || $3 == "any")' "$INDEX" | head -n 1; }
 
@@ -70,9 +70,10 @@ list_dir() {
 cmd_list() {
     fetch_index
     echo "Libraries for $PLAT (from $CNLPLIB_INDEX):"
-    awk -F'\t' -v p="$PLAT" '$3 == p && $7 == "lib" { printf "  %-14s %-16s %s\n", $1, $2, $6; n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
+    printf "  %-14s %-10s %-10s %s\n" NAME RELEASE BACKENDS DESCRIPTION
+    awk -F'\t' -v p="$PLAT" '$3 == p && $7 == "lib" { printf "  %-14s %-10s %-10s %s\n", $1, $2, $10, $6; n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
     echo "Solvers:"
-    awk -F'\t' -v p="$PLAT" '$3 == p && $7 == "solver" { printf "  %-14s %-16s %s\n", $1, $2, $6; n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
+    awk -F'\t' -v p="$PLAT" '$3 == p && $7 == "solver" { printf "  %-14s %-10s %-10s %s\n", $1, $2, $10, $6; n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
     echo "Data sets:"
     awk -F'\t' '$3 == "any" { printf "  %-14s %-16s %s\n", $1, $2, $6; n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
     echo "Installed in $LIBDIR:"; list_dir "$LIBDIR"

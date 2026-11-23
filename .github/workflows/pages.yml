@@ -19,6 +19,8 @@ jobs:
           python-version: "3.12"
       - name: Validate entries and build the index
         run: python3 scripts/build_index.py
+      - name: Render the documentation
+        run: pip install -q markdown && python3 scripts/build_site.py
       - name: Check the shell scripts
         run: |
           sh -n install.sh
@@ -42,10 +44,10 @@ jobs:
       - name: Build the site
         run: |
           python3 scripts/build_index.py
+          pip install -q markdown && python3 scripts/build_site.py
           cp install.sh site/install
           cp install.sh site/install.sh
           cp bin/cnlp site/cnlp
-          printf '<!doctype html><meta charset="utf-8"><title>cnlplib</title><p>cnlplib: compiled nonlinear programs. Install the <code>cnlp</code> command: <code>curl -fsSL https://cnlplib.madsuite.org/install | sh</code>. Index: <a href="index.json">index.json</a>. Source: <a href="https://github.com/madsuite-org/cnlplib">madsuite-org/cnlplib</a>.</p>\n' > site/index.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

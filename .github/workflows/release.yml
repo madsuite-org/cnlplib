@@ -36,6 +36,8 @@ jobs:
           tar -xzf dist/ipopt-linux-x86_64.tar.gz -C "$H/solvers"
           tar -xzf dist/cnlp-solve-linux-x86_64.tar.gz -C "$H"
           CNLPLIB_HOME="$H" /tmp/py/bin/python conformance/check_solver.py ipopt "$H/cnlp-solve/bin/cnlp-solve"
+      - name: End to end (installer, cnlp install, every cnlp solve path)
+        run: sh conformance/cli/check_cli.sh dist /tmp/py/bin/python
       - uses: actions/upload-artifact@v4
         with:
           name: cnlp-binaries

@@ -10,7 +10,9 @@ and checks each against the SHA256SUMS of the same release. (`url`, a template w
 
 index.tsv has one line per library, channel and platform, and one per data set: name,
 label, platform, url, sha256 (`-`: in the SHA256SUMS next to the asset), description,
-kind, requires, versioned url (`{version}` substituted; `-` if none), tab-separated. The
+kind, requires, versioned url (`{version}` substituted; `-` if none), backends
+(comma-separated: a solver's `backends`, or `cpu` plus a library's `device` tiers),
+tab-separated. The
 nightly channel's lines are named `<name>@nightly`. Data sets have platform `any`, kind
 `data` and a sha256. Solvers (solvers/*.toml) are listed the same way with kind `solver`; a `rolling` entry has
 no versioned releases, so its plain name installs the `nightly` release. The installer
@@ -27,7 +29,8 @@ DATA_REQUIRED = ("name", "description", "homepage", "license", "maintainers", "v
 REQUIRED = ("name", "description", "producer", "homepage", "license", "maintainers", "models",
             "cnlp_abi", "platforms")
 SOLVER_REQUIRED = ("name", "description", "homepage", "license", "maintainers", "solver_interface",
-                   "platforms", "repo")
+                   "platforms", "repo", "backends")
+BACKENDS = {"cpu", "cuda", "rocm", "oneapi", "metal"}
 
 
 def check(path, required=REQUIRED):
@@ -54,6 +57,9 @@ def check(path, required=REQUIRED):
     for plat in e["platforms"]:
         if not PLATFORM.match(plat):
             errs.append(f"platform {plat!r} is not <os>-<arch>")
+    for b in e.get("backends", []):
+        if b not in BACKENDS:
+            errs.append(f"backend {b!r} is not one of {sorted(BACKENDS)}")
     for d in e.get("data", []):
         if not os.path.isfile(os.path.join(ROOT, "data", f"{d}.toml")):
             errs.append(f"`data` names {d!r}, which has no data/{d}.toml")
@@ -110,22 +116,23 @@ def main():
                 desc = e["description"].replace("\t", " ")
                 req = ",".join(e.get("data", []))
                 n = e["name"]
+                be = ",".join(e["backends"] if kind == "solver" else ["cpu", *e.get("device", [])])
                 for plat in sorted(e["platforms"]):
                     asset = f"{n}-{plat}.tar.gz"
                     if "url" in e:
-                        f.write(f"{n}\t{e.get('label', 'fixed')}\t{plat}\t{e['url'].replace('{platform}', plat)}\t-\t{desc}\t{kind}\t{req}\t-\n")
+                        f.write(f"{n}\t{e.get('label', 'fixed')}\t{plat}\t{e['url'].replace('{platform}', plat)}\t-\t{desc}\t{kind}\t{req}\t-\t{be}\n")
                         continue
                     base = f"https://github.com/{e['repo']}/releases"
                     if e.get("rolling"):
-                        f.write(f"{n}\tnightly\t{plat}\t{base}/download/nightly/{asset}\t-\t{desc}\t{kind}\t{req}\t-\n")
+                        f.write(f"{n}\tnightly\t{plat}\t{base}/download/nightly/{asset}\t-\t{desc}\t{kind}\t{req}\t-\t{be}\n")
                         continue
-                    f.write(f"{n}\tlatest\t{plat}\t{base}/latest/download/{asset}\t-\t{desc}\t{kind}\t{req}\t{base}/download/v{{version}}/{asset}\n")
+                    f.write(f"{n}\tlatest\t{plat}\t{base}/latest/download/{asset}\t-\t{desc}\t{kind}\t{req}\t{base}/download/v{{version}}/{asset}\t{be}\n")
                     if e.get("nightly"):
-                        f.write(f"{n}@nightly\tnightly\t{plat}\t{base}/download/nightly/{asset}\t-\t{desc}\t{kind}\t{req}\t-\n")
+                        f.write(f"{n}@nightly\tnightly\t{plat}\t{base}/download/nightly/{asset}\t-\t{desc}\t{kind}\t{req}\t-\t{be}\n")
         for e in data:
             v = e["versions"][-1]
             desc = e["description"].replace("\t", " ")
-            f.write(f"{e['name']}\t{v['version']}\tany\t{v['url']}\t{v['sha256']}\t{desc}\tdata\t\t-\n")
+            f.write(f"{e['name']}\t{v['version']}\tany\t{v['url']}\t{v['sha256']}\t{desc}\tdata\t\t-\t-\n")
     print(f"index: {len(entries)} libraries, {len(solvers)} solvers, {len(data)} data sets")
 
 

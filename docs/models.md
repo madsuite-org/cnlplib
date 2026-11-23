@@ -121,7 +121,7 @@ repo        = "madsuite-org/LuksanVlcekBenchmark.jl"  # where the releases are
 nightly     = true                                    # publishes a `nightly` release
 platforms   = ["linux-x86_64"]
 cnlp_abi    = "0.2"
-device      = ["cuda"]                                # optional
+device      = ["cuda"]                                # optional: device tiers it exports (shown as backends)
 data        = ["pglib"]                               # optional: data sets it needs
 ```
 

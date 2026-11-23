@@ -8,3 +8,4 @@ nightly          = true
 rolling          = true                     # only the rolling `nightly` release, for now
 platforms        = ["linux-x86_64"]
 solver_interface = "0.1"
+backends         = ["cpu"]
