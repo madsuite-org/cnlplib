@@ -85,7 +85,7 @@ jobs:
           mkdir unpacked && tar -xzf "${{ inputs.name }}-linux-x86_64.tar.gz" -C unpacked
           env -i PATH=/usr/bin:/bin ./smoke "unpacked/${{ inputs.name }}/lib/lib${{ inputs.name }}.so" "${{ inputs.check-size }}"
       - name: Sources of the GPL and LGPL libraries in the runtime
-        run: cnlplib/scripts/gpl-sources.sh "$(sed -n 's/^julia = //p' unpacked/${{ inputs.name }}/VERSION)" . "${{ inputs.name }}"
+        run: sh cnlplib/scripts/gpl-sources.sh "$(sed -n 's/^julia = //p' unpacked/${{ inputs.name }}/VERSION)" . "${{ inputs.name }}"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.name }}-library
