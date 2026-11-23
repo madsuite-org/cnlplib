@@ -86,7 +86,7 @@ static void forward_blas(void) {
     char* slash = strrchr(path, '/');
     if (!slash) return;
     snprintf(slash + 1, sizeof path - (size_t)(slash + 1 - path), "libopenblas.so");
-    fwd(path, 1, 0, NULL);
+    fwd(path, 0, 0, NULL);   /* add to what is forwarded: a model library in the same process may have forwarded its own */
 }
 
 int64_t cnlp_solver_version(void) { return CNLP_SOLVER_VERSION; }
