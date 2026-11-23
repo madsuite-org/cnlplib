@@ -5,18 +5,23 @@
 #   julia scripts/check-library.jl LIBPATH [N]
 using Pkg
 Pkg.activate(; temp = true)
-Pkg.add([Pkg.PackageSpec(url = "https://github.com/madsuite-org/CNLPModels.jl"),
+Pkg.add([Pkg.PackageSpec(url = "https://github.com/madsuite-org/CNLPLib.jl"),
          Pkg.PackageSpec(name = "NLPModels"), Pkg.PackageSpec(name = "CUDA")]; io = devnull)
-using CNLPModels, NLPModels, CUDA, Libdl
+using NLPModels, CUDA, Libdl
+# CNLPLib (named CNLPModels before its first registration): found by UUID, either name
+const CL = let u = Base.UUID("e8ddee8d-ce21-405b-9ec9-45cea2c1b284")
+    Base.require(Base.PkgId(u, Pkg.dependencies()[u].name))
+end
+const CNLPModel = CL.CNLPModel
 
 libpath = ARGS[1]
 n = length(ARGS) >= 2 ? parse(Int, ARGS[2]) : 10
-lib = CNLPModels.load(libpath)
+lib = CL.load(libpath)
 @assert ccall(Libdl.dlsym(lib.handle, :cnlp_abi_version), Int64, ()) == 2 "not a cnlp 0.2 library"
 gpu = CUDA.functional()
 rel(a, b) = maximum(abs, Array(a) .- b; init = 0.0) / max(1.0, maximum(abs, b; init = 0.0))
 failed = String[]
-for model in CNLPModels.available_models(lib)
+for model in CL.available_models(lib)
     # P_argtype (copy-out): "" for a fixed model, else comma-separated `type|description`
     fp = Libdl.dlsym(lib.handle, Symbol(model, "_argtype"))
     buf = zeros(UInt8, 1024)

@@ -9,7 +9,7 @@
 #                             NAME@1.2.3 that version
 #   cnlplib up                 update everything installed (a pinned version stays)
 #   cnlplib remove NAME...     remove installed libraries or data sets
-#   cnlplib path               print the library directory (for CNLPMODELS_PATH)
+#   cnlplib path               print the library directory (for CNLPLIB_PATH)
 #
 # Environment: CNLPLIB_HOME (default ~/.cnlplib), CNLPLIB_INDEX (default the published index).
 set -eu

@@ -14,10 +14,10 @@ cnlplib up                                              # update everything inst
 ```
 
 Installed libraries are found by name by every cnlp consumer, because the installer
-puts `~/.cnlplib/lib` on `CNLPMODELS_PATH`:
+puts `~/.cnlplib/lib` on `CNLPLIB_PATH`:
 
 ```julia
-using CNLPModels
+using CNLPLib
 m = CNLPModel("@lv", :wood, 100_000)
 ```
 

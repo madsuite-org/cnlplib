@@ -7,7 +7,7 @@
 #   --add-to-path no   leave shell startup files alone
 #
 # It installs DIR/bin/cnlplib and, unless told not to, adds to ~/.bashrc, ~/.zshrc and
-# ~/.profile a marked block that puts DIR/bin on PATH and DIR/lib on CNLPMODELS_PATH,
+# ~/.profile a marked block that puts DIR/bin on PATH and DIR/lib on CNLPLIB_PATH,
 # so cnlp consumers find installed libraries by name. Run it again to update cnlplib.
 set -eu
 
@@ -41,7 +41,7 @@ if [ "$ADD" = yes ]; then
     begin="# >>> cnlplib initialize >>>"; end="# <<< cnlplib initialize <<<"
     block="$begin
 export PATH=\"$PREFIX/bin:\$PATH\"
-export CNLPMODELS_PATH=\"$PREFIX/lib\${CNLPMODELS_PATH:+:\$CNLPMODELS_PATH}\"
+export CNLPLIB_PATH=\"$PREFIX/lib\${CNLPLIB_PATH:+:\$CNLPLIB_PATH}\"
 $end"
     for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
         [ -f "$rc" ] || [ "$rc" = "$HOME/.profile" ] || continue
@@ -52,6 +52,6 @@ $end"
         printf '\n%s\n' "$block" >> "$rc"
         echo "Updated $rc"
     done
-    echo "For this terminal:  export PATH=\"$PREFIX/bin:\$PATH\" CNLPMODELS_PATH=\"$PREFIX/lib\${CNLPMODELS_PATH:+:\$CNLPMODELS_PATH}\""
+    echo "For this terminal:  export PATH=\"$PREFIX/bin:\$PATH\" CNLPLIB_PATH=\"$PREFIX/lib\${CNLPLIB_PATH:+:\$CNLPLIB_PATH}\""
 fi
 echo "Next:  cnlplib list"
