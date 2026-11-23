@@ -1,0 +1,121 @@
+# Build, check and publish a model package's cnlp library. Called from the package:
+#
+#   on:
+#     push: { branches: [main], tags: ["v*"] }
+#     pull_request:
+#   jobs:
+#     library:
+#       uses: madsuite-org/cnlplib/.github/workflows/library.yml@main
+#       with: { name: lv }
+#       permissions: { contents: write }
+#
+# Every run builds and checks. A push to the default branch replaces the assets of the
+# package's rolling `nightly` release; a `v*` tag (TagBot's, on registration) attaches
+# them to that version's release.
+name: Library
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        description: Library name (lowercase), the one users install and resolve as @name
+        required: true
+        type: string
+      device:
+        description: '"cuda" to add the device tier (needs a GPU runner), "" for host only'
+        default: cuda
+        type: string
+      julia-version:
+        default: "1.12.7"
+        type: string
+      runs-on:
+        description: Runner labels, as JSON
+        default: '["self-hosted", "gpu", "cuda", "shin-compute"]'
+        type: string
+      examodelscompiler-rev:
+        description: Take ExaModelsCompiler from this ExaModels.jl revision instead of the registry
+        default: ""
+        type: string
+      check-size:
+        description: Size at which models sized by one integer are checked
+        default: "10"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: package
+      - uses: actions/checkout@v5
+        with:
+          repository: madsuite-org/cnlplib
+          path: cnlplib
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ inputs.julia-version }}
+      - name: Version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            v="${GITHUB_REF_NAME#v}"
+            p=$(sed -n 's/^version = "\(.*\)"$/\1/p' package/Project.toml)
+            [ "$v" = "$p" ] || { echo "tag $GITHUB_REF_NAME, but Project.toml says $p"; exit 1; }
+          else
+            v=nightly
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Build
+        env:
+          EXAMODELSCOMPILER_REV: ${{ inputs.examodelscompiler-rev }}
+        run: julia --startup-file=no cnlplib/scripts/build-library.jl package "${{ inputs.name }}" build ${{ inputs.device }}
+      - name: Check
+        run: julia --startup-file=no cnlplib/scripts/check-library.jl "build/${{ inputs.name }}/lib/lib${{ inputs.name }}.so" "${{ inputs.check-size }}"
+      - name: Package
+        run: cnlplib/scripts/package-library.sh "build/${{ inputs.name }}" "${{ inputs.name }}" "${{ steps.version.outputs.version }}" linux-x86_64 package/LICENSE "${{ inputs.device }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.name }}-library
+          path: ${{ inputs.name }}-*.tar.gz
+
+  publish:
+    needs: build
+    if: github.event_name == 'push' && (github.ref_type == 'tag' || github.ref_name == github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.name }}-library
+          path: dist
+      - name: Checksums
+        run: cd dist && sha256sum -- *.tar.gz > SHA256SUMS && cat SHA256SUMS
+      - name: Versioned release
+        if: github.ref_type == 'tag'
+        run: |
+          gh release view "$GITHUB_REF_NAME" -R "$REPO" > /dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" -R "$REPO" --verify-tag --title "$GITHUB_REF_NAME" --notes ""
+          gh release upload "$GITHUB_REF_NAME" -R "$REPO" --clobber dist/*.tar.gz dist/SHA256SUMS
+      - name: Nightly release
+        if: github.ref_type != 'tag'
+        run: |
+          # move the `nightly` tag to this commit, then replace the release's assets
+          gh api -X PATCH "repos/$REPO/git/refs/tags/nightly" -f sha="$GITHUB_SHA" -F force=true > /dev/null 2>&1 ||
+            gh api -X POST "repos/$REPO/git/refs" -f ref=refs/tags/nightly -f sha="$GITHUB_SHA" > /dev/null
+          notes="Built from $GITHUB_SHA on $(date -u +%Y-%m-%d). Install: cnlplib install ${{ inputs.name }}@nightly"
+          if gh release view nightly -R "$REPO" > /dev/null 2>&1; then
+            gh release edit nightly -R "$REPO" --prerelease --notes "$notes"
+          else
+            gh release create nightly -R "$REPO" --prerelease --title "Nightly" --notes "$notes"
+          fi
+          gh release upload nightly -R "$REPO" --clobber dist/*.tar.gz dist/SHA256SUMS

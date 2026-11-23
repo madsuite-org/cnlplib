@@ -4,8 +4,10 @@
 #   cnlplib list               available libraries for this platform, and what is installed
 #   cnlplib install NAME...    install or update libraries (into $CNLPLIB_HOME/lib/NAME) or
 #                             data sets (into $CNLPLIB_HOME/data/NAME); a library brings
-#                             the data sets it needs
-#   cnlplib up                 update everything installed to the newest version
+#                             the data sets it needs. NAME is the latest release,
+#                             NAME@nightly the rolling build of the default branch,
+#                             NAME@1.2.3 that version
+#   cnlplib up                 update everything installed (a pinned version stays)
 #   cnlplib remove NAME...     remove installed libraries or data sets
 #   cnlplib path               print the library directory (for CNLPMODELS_PATH)
 #
@@ -42,17 +44,20 @@ fetch_index() {
     curl -fsSL "$CNLPLIB_INDEX" -o "$INDEX" || die "could not download the index from $CNLPLIB_INDEX"
 }
 
-# name version platform url sha256 description kind requires, for this platform
+# name label platform url sha256 description kind requires versioned-url, for this platform
+# (sha256 `-`: in the SHA256SUMS next to the asset; versioned-url has `{version}`)
 lookup() { awk -F'\t' -v n="$1" -v p="$PLAT" '$1 == n && ($3 == p || $3 == "any")' "$INDEX" | head -n 1; }
 
-installed_version() { cat "$LIBDIR/$1/.cnlplib-version" "$DATADIR/$1/.cnlplib-version" 2>/dev/null | head -n 1; }
+# what is installed: "<version> <sha256> <request>"
+installed() { cat "$LIBDIR/$1/.cnlplib-version" "$DATADIR/$1/.cnlplib-version" 2>/dev/null | head -n 1; }
 
 list_dir() {
     found=0
     if [ -d "$1" ]; then
         for d in "$1"/*/; do
             [ -d "$d" ] || continue
-            n="$(basename "$d")"; printf "  %-14s %s\n" "$n" "$(cat "$d/.cnlplib-version" 2>/dev/null)"; found=1
+            n="$(basename "$d")"; i="$(cat "$d/.cnlplib-version" 2>/dev/null)"
+            printf "  %-14s %-16s %s\n" "$n" "${i%% *}" "$(printf '%s' "$i" | cut -d' ' -f3)"; found=1
         done
     fi
     [ "$found" = 1 ] || echo "  (none)"
@@ -70,35 +75,60 @@ cmd_list() {
 }
 
 install_one() {
-    line="$(lookup "$1")"
-    [ -n "$line" ] || die "no library '$1' for $PLAT in the index (see: cnlplib list)"
-    # data sets it needs first (sh has no locals: re-read this entry afterwards)
+    req="$1"; n="${req%%@*}"; sel=""
+    case "$req" in *@*) sel="${req#*@}" ;; esac
+    case "$sel" in
+        ""|latest) line="$(lookup "$n")" ;;
+        nightly) line="$(lookup "$n@nightly")" ;;
+        *) line="$(lookup "$n")" ;;
+    esac
+    [ -n "$line" ] || die "no '$req' for $PLAT in the index (see: cnlplib list)"
+    # data sets it needs first (sh has no locals: re-read this entry's fields afterwards)
     for r in $(printf '%s' "$line" | cut -f8 | tr ',' ' '); do install_one "$r"; done
-    line="$(lookup "$1")"
+    req="$1"; n="${req%%@*}"; sel=""
+    case "$req" in *@*) sel="${req#*@}" ;; esac
+    case "$sel" in ""|latest) line="$(lookup "$n")" ;; nightly) line="$(lookup "$n@nightly")" ;; *) line="$(lookup "$n")" ;; esac
     ver="$(printf '%s' "$line" | cut -f2)"; url="$(printf '%s' "$line" | cut -f4)"; want="$(printf '%s' "$line" | cut -f5)"
-    kind="$(printf '%s' "$line" | cut -f7)"
+    kind="$(printf '%s' "$line" | cut -f7)"; tmpl="$(printf '%s' "$line" | cut -f9)"
+    case "$sel" in
+        ""|latest|nightly) ;;
+        *)  [ -n "$tmpl" ] && [ "$tmpl" != "-" ] || die "$n has no versioned releases"
+            url="$(printf '%s' "$tmpl" | sed "s/{version}/$sel/g")"; ver="$sel"; want="-" ;;
+    esac
     dest="$LIBDIR"; [ "$kind" = data ] && dest="$DATADIR"
-    if [ "$(installed_version "$1")" = "$ver" ]; then echo "$1 $ver is up to date"; return; fi
-    echo "Installing $1 $ver"
+    if [ "$want" = "-" ]; then
+        # published with the asset: the SHA256SUMS of the same release
+        want="$(curl -fsSL "${url%/*}/SHA256SUMS" 2>/dev/null | awk -v f="${url##*/}" '$2 == f || $2 == "*" f { print $1 }')"
+        [ -n "$want" ] || die "no checksum for ${url##*/} in ${url%/*}/SHA256SUMS (is '$req' released?)"
+    fi
+    cur="$(installed "$n")"
+    if [ "$(printf '%s' "$cur" | cut -d' ' -f2)" = "$want" ]; then
+        # same bytes: record the request, so `up` follows the channel asked for last
+        f="$dest/$n/.cnlplib-version"; echo "${cur%% *} $want $req" > "$f"
+        echo "$req is up to date"; return
+    fi
+    echo "Installing $req"
     mkdir -p "$dest"
-    stage="$(mktemp -d "$dest/.stage-$1.XXXXXX")"
+    stage="$(mktemp -d "$dest/.stage-$n.XXXXXX")"
     trap 'rm -rf "$stage"' EXIT INT TERM
     curl -fSL --progress-bar "$url" -o "$stage/asset.tar.gz" || die "download failed: $url"
     got="$(sha256 "$stage/asset.tar.gz")"
-    [ "$got" = "$want" ] || die "checksum mismatch for $1 $ver: expected $want, got $got"
+    [ "$got" = "$want" ] || die "checksum mismatch for $req: expected $want, got $got"
     mkdir "$stage/x"; tar -xzf "$stage/asset.tar.gz" -C "$stage/x"
     # the asset's content, or its single top-level directory
     src="$stage/x"
     if [ "$(ls -A "$src" | wc -l)" -eq 1 ] && [ -d "$src/$(ls -A "$src")" ]; then src="$src/$(ls -A "$src")"; fi
-    [ "$kind" = data ] || ls "$src/lib/lib$1".* >/dev/null 2>&1 || die "the asset for $1 has no lib/lib$1.<ext>"
-    echo "$ver" > "$src/.cnlplib-version"
+    [ "$kind" = data ] || ls "$src/lib/lib$n".* >/dev/null 2>&1 || die "the asset for $req has no lib/lib$n.<ext>"
+    # the version the asset says it is, if it says
+    v="$(sed -n 's/^version *= *//p' "$src/VERSION" 2>/dev/null | head -n 1)"; [ -n "$v" ] && ver="$v"
+    echo "$ver $want $req" > "$src/.cnlplib-version"
     # swap into place: a failed install never leaves a half-installed library
-    rm -rf "$dest/.old-$1"
-    [ -d "$dest/$1" ] && mv "$dest/$1" "$dest/.old-$1"
-    mv "$src" "$dest/$1"
-    rm -rf "$dest/.old-$1" "$stage"
+    rm -rf "$dest/.old-$n"
+    [ -d "$dest/$n" ] && mv "$dest/$n" "$dest/.old-$n"
+    mv "$src" "$dest/$n"
+    rm -rf "$dest/.old-$n" "$stage"
     trap - EXIT INT TERM
-    echo "Installed $1 $ver in $dest/$1"
+    echo "Installed $n $ver in $dest/$n"
 }
 
 cmd_install() {
@@ -112,7 +142,12 @@ cmd_up() {
     names=""
     for dir in "$LIBDIR" "$DATADIR"; do
         [ -d "$dir" ] || continue
-        for d in "$dir"/*/; do [ -d "$d" ] && names="$names $(basename "$d")"; done
+        for d in "$dir"/*/; do
+            [ -d "$d" ] || continue
+            # reinstall what was asked for: NAME, NAME@nightly, or a pinned NAME@1.2.3
+            r="$(cut -d' ' -f3 "$d/.cnlplib-version" 2>/dev/null)"
+            names="$names ${r:-$(basename "$d")}"
+        done
     done
     [ -n "$names" ] || { echo "nothing installed"; return; }
     # shellcheck disable=SC2086
@@ -136,6 +171,6 @@ case "${1:-}" in
     up|update) cmd_up ;;
     remove|uninstall) shift; cmd_remove "$@" ;;
     path) echo "$LIBDIR" ;;
-    ""|-h|--help|help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
+    ""|-h|--help|help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' ;;
     *) die "unknown command '$1' (see: cnlplib help)" ;;
 esac
