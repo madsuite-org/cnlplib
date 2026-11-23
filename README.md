@@ -8,7 +8,8 @@ can be listed, whatever produced it.
 ```sh
 curl -fsSL https://cnlplib.madsuite.org/install | sh     # installs the cnlplib command
 cnlplib list                                            # available and installed libraries
-cnlplib install emp cops                                # into ~/.cnlplib/lib
+cnlplib install lv                                      # the latest release, into ~/.cnlplib/lib
+cnlplib install lv@nightly                              # or the latest build of the default branch
 cnlplib up                                              # update everything installed
 ```
 
@@ -17,23 +18,19 @@ puts `~/.cnlplib/lib` on `CNLPMODELS_PATH`:
 
 ```julia
 using CNLPModels
-m = CNLPModel("@emp", :acp; input = :matpower => "case1354.m")
+m = CNLPModel("@lv", :wood, 100_000)
 ```
-
-```sh
-madnlp emp acp case1354_pglib --format matpower --output sol.m
-```
-
-Julia users of a modelling package usually do not need cnlplib: the package's own
-`Artifacts.toml` fetches its compiled library on first use. cnlplib is for the command
-line, C, Python and cluster installs, and for libraries from other producers.
 
 ## How it works
 
-- Each library is released by its own project, as one `.tar.gz` per platform on its
-  GitHub Releases. cnlplib does not rehost binaries.
-- This repository lists them: one TOML file per library in [libraries/](libraries/),
-  with the download URL and SHA-256 of each platform's asset.
+- Each library is released by its own project, as `<name>-<platform>.tar.gz` and a
+  `SHA256SUMS` on its GitHub Releases: every version, and a rolling `nightly`. cnlplib
+  does not rehost binaries.
+- This repository lists the libraries, one TOML file each in [libraries/](libraries/),
+  naming the repository that releases it. It lists no versions, so a release needs no
+  change here; the installer checks every download against the release's `SHA256SUMS`.
+- Model packages build and publish their releases with one reusable workflow,
+  [`.github/workflows/library.yml`](.github/workflows/library.yml).
 - CI validates every entry and publishes the index ([index.json](https://cnlplib.madsuite.org/index.json),
   and `index.tsv` for the installer) and the installer to `https://cnlplib.madsuite.org/`.
 
