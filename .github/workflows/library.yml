@@ -112,7 +112,7 @@ jobs:
           # move the `nightly` tag to this commit, then replace the release's assets
           gh api -X PATCH "repos/$REPO/git/refs/tags/nightly" -f sha="$GITHUB_SHA" -F force=true > /dev/null 2>&1 ||
             gh api -X POST "repos/$REPO/git/refs" -f ref=refs/tags/nightly -f sha="$GITHUB_SHA" > /dev/null
-          notes="Built from $GITHUB_SHA on $(date -u +%Y-%m-%d). Install: cnlplib install ${{ inputs.name }}@nightly"
+          notes="Built from $GITHUB_SHA on $(date -u +%Y-%m-%d). Install: cnlp install ${{ inputs.name }}@nightly"
           if gh release view nightly -R "$REPO" > /dev/null 2>&1; then
             gh release edit nightly -R "$REPO" --prerelease --notes "$notes"
           else

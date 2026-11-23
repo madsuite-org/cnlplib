@@ -1,7 +1,7 @@
 # Library entries
 
 One file per library, `libraries/<name>.toml`. `<name>` is what users install
-(`cnlplib install <name>`) and the name consumers resolve (`@<name>`), so the library file
+(`cnlp install <name>`) and the name consumers resolve (`@<name>`), so the library file
 inside each asset must be `lib/lib<name>.<ext>`.
 
 An entry names the repository that releases the library; it lists no versions:
@@ -25,7 +25,7 @@ data        = ["pglib"]                               # optional: data sets it n
 Every release of `repo` (tag `v<version>`, and `nightly` if published) carries
 `<name>-<platform>.tar.gz` and a `SHA256SUMS`. The installer takes
 
-| `cnlplib install` | from |
+| `cnlp install` | from |
 |---|---|
 | `lv` | `releases/latest/download/lv-<platform>.tar.gz` |
 | `lv@nightly` | `releases/download/nightly/lv-<platform>.tar.gz` |

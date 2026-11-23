@@ -1,14 +1,14 @@
 #!/bin/sh
-# Install the cnlplib command:  curl -fsSL https://cnlplib.madsuite.org/install | sh
+# Install the cnlp command:  curl -fsSL https://cnlplib.madsuite.org/install | sh
 #
 # Options (after `sh -s --`):
 #   -y                 do not ask for confirmation
 #   --path DIR         install directory (default ~/.cnlplib)
 #   --add-to-path no   leave shell startup files alone
 #
-# It installs DIR/bin/cnlplib and, unless told not to, adds to ~/.bashrc, ~/.zshrc and
+# It installs DIR/bin/cnlp and, unless told not to, adds to ~/.bashrc, ~/.zshrc and
 # ~/.profile a marked block that puts DIR/bin on PATH and DIR/lib on CNLPLIB_PATH,
-# so cnlp consumers find installed libraries by name. Run it again to update cnlplib.
+# so cnlp consumers find installed libraries by name. Run it again to update cnlp.
 set -eu
 
 BASE="${CNLPLIB_BASE:-https://cnlplib.madsuite.org}"
@@ -25,17 +25,17 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
-echo "cnlplib will be installed in: $PREFIX"
+echo "cnlp will be installed in: $PREFIX"
 if [ "$YES" = 0 ] && [ -r /dev/tty ]; then
     printf "Proceed? [Y/n] "; read -r ans < /dev/tty || ans=y
     case "$ans" in n|N|no|No) echo "Cancelled."; exit 1 ;; esac
 fi
 
 mkdir -p "$PREFIX/bin" "$PREFIX/lib"
-tmp="$(mktemp "$PREFIX/bin/.cnlplib.XXXXXX")"
-curl -fsSL "$BASE/cnlplib" -o "$tmp" || { rm -f "$tmp"; echo "install: download failed: $BASE/cnlplib" >&2; exit 1; }
-chmod +x "$tmp"; mv "$tmp" "$PREFIX/bin/cnlplib"
-echo "Installed $PREFIX/bin/cnlplib"
+tmp="$(mktemp "$PREFIX/bin/.cnlp.XXXXXX")"
+curl -fsSL "$BASE/cnlp" -o "$tmp" || { rm -f "$tmp"; echo "install: download failed: $BASE/cnlp" >&2; exit 1; }
+chmod +x "$tmp"; mv "$tmp" "$PREFIX/bin/cnlp"
+echo "Installed $PREFIX/bin/cnlp"
 
 if [ "$ADD" = yes ]; then
     begin="# >>> cnlplib initialize >>>"; end="# <<< cnlplib initialize <<<"
@@ -54,4 +54,4 @@ $end"
     done
     echo "For this terminal:  export PATH=\"$PREFIX/bin:\$PATH\" CNLPLIB_PATH=\"$PREFIX/lib\${CNLPLIB_PATH:+:\$CNLPLIB_PATH}\""
 fi
-echo "Next:  cnlplib list"
+echo "Next:  cnlp list"

@@ -1,44 +1,86 @@
 # cnlplib
 
-A registry and installer for compiled optimization model libraries: shared libraries
-implementing the [cnlp ABI](https://github.com/madsuite-org/cnlp-abi), such as the
-compiled ExaModelsPower, COPS and Luksan–Vlček models. Any library implementing the ABI
-can be listed, whatever produced it.
+Compiled nonlinear programs: a C ABI for them, a registry of libraries that implement it,
+and the `cnlp` command that installs and solves them.
 
 ```sh
-curl -fsSL https://cnlplib.madsuite.org/install | sh     # installs the cnlplib command
-cnlplib list                                            # available and installed libraries
-cnlplib install lv                                      # the latest release, into ~/.cnlplib/lib
-cnlplib install lv@nightly                              # or the latest build of the default branch
-cnlplib up                                              # update everything installed
+curl -fsSL https://cnlplib.madsuite.org/install | sh    # installs the cnlp command
+cnlp list                                              # available and installed libraries
+cnlp install lv                                        # the latest release, into ~/.cnlplib/lib
+cnlp install lv@nightly                                # or the latest build of the default branch
+cnlp up                                                # update everything installed
 ```
 
-Installed libraries are found by name by every cnlp consumer, because the installer
-puts `~/.cnlplib/lib` on `CNLPLIB_PATH`:
+Installed libraries are found by name by every cnlp consumer, because the installer puts
+`~/.cnlplib/lib` on `CNLPLIB_PATH`:
 
 ```julia
 using CNLPLib
 m = CNLPModel("@lv", :wood, 100_000)
 ```
 
-## How it works
+## The ABI
+
+A cnlp library is a shared library that carries one or more optimization models. Each model
+exports plain C symbols to instantiate it and to evaluate its objective, gradient,
+constraints, sparse Jacobian and Lagrangian Hessian. Any language that can call C can load
+the library and solve the models, with no modeling tool installed.
+
+- **[cnlp.h](cnlp.h)**: the specification, version 0.2. The header is the normative
+  document: each contract is in its comments, and its macros declare every symbol for a
+  model prefix, so an implementation is checked against the file it follows.
+- **[formats/](formats/)**: the files that go with a library: the input a model is
+  instantiated from ([input.md](formats/input.md)), parameter values
+  ([parameters.md](formats/parameters.md)) and solutions ([solution.md](formats/solution.md)),
+  in HDF5, and the number formats a model can be evaluated in
+  ([numbers.md](formats/numbers.md)).
+- **[example/](example/)**: a complete model library and a consumer in plain C;
+  **[conformance/](conformance/)**: reference files and their check.
+
+A model always has the core symbols (sizes, bounds, starting point, evaluation). Optional
+tiers add a library-level model list, instantiation from structured data, named blocks of
+variables, constraints and parameters, the objective sense, solution writers, readers of
+the model's own file formats, evaluation on a GPU with device pointers, evaluation in
+binary32, and evaluation in other number formats. A consumer checks one symbol per tier
+and works without the tiers a library does not export.
+
+## The registry
 
 - Each library is released by its own project, as `<name>-<platform>.tar.gz` and a
   `SHA256SUMS` on its GitHub Releases: every version, and a rolling `nightly`. cnlplib
   does not rehost binaries.
-- This repository lists the libraries, one TOML file each in [libraries/](libraries/),
-  naming the repository that releases it. It lists no versions, so a release needs no
-  change here; the installer checks every download against the release's `SHA256SUMS`.
+- [libraries/](libraries/) lists them, one TOML file each, naming the repository that
+  releases it. It lists no versions, so a release needs no change here; `cnlp` checks every
+  download against the release's `SHA256SUMS`. [data/](data/) lists data sets.
 - Model packages build and publish their releases with one reusable workflow,
   [`.github/workflows/library.yml`](.github/workflows/library.yml).
-- CI validates every entry and publishes the index ([index.json](https://cnlplib.madsuite.org/index.json),
-  and `index.tsv` for the installer) and the installer to `https://cnlplib.madsuite.org/`.
+- CI validates every entry and publishes the index and the installer to
+  `https://cnlplib.madsuite.org/`.
 
-## Adding a library
+To add a library, open a pull request adding `libraries/<name>.toml`; see
+[libraries/README.md](libraries/README.md).
 
-Open a pull request adding `libraries/<name>.toml`; see [libraries/README.md](libraries/README.md)
-for the fields. CI checks the entry; a maintainer reviews and merges.
+## Producers and consumers
+
+- [ExaModelsCompiler](https://github.com/madsuite-org/ExaModels.jl) compiles ExaModels
+  models into cnlp libraries ahead of time, optionally with GPU evaluation.
+- [CNLPLib.jl](https://github.com/madsuite-org/CNLPLib.jl) (Julia) and
+  [cnlpmodels-py](https://github.com/madsuite-org/cnlpmodels-py) (Python) load cnlp
+  libraries as NLPModels and Python objects.
+
+The ABI does not depend on any of these: anything that exports the symbols is a cnlp library.
+
+## Prior work
+
+The evaluation semantics follow [NLPModels.jl](https://jso.dev/NLPModels.jl/stable/api/),
+and the Lagrangian Hessian convention (objective weight and multipliers, lower triangle)
+follows the [AMPL Solver Library](https://www.netlib.org/ampl/solvers/asl.h).
+[CUTEst](https://github.com/ralna/CUTEst) compiles test problems into libraries;
+[CppADCodeGen](https://github.com/joaoleal/CppADCodeGen) introduced the in-library model
+list; [FMI](https://fmi-standard.org) is the analogous standard for simulation models.
+Solver C APIs such as Ipopt's define the same callbacks in the other direction, so a cnlp
+library binds to them directly.
 
 ## License
 
-MIT for this repository. Each library carries its own license, recorded in its entry.
+MIT. Each library in the registry carries its own license, recorded in its entry.

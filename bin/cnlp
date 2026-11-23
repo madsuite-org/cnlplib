@@ -1,15 +1,15 @@
 #!/bin/sh
-# cnlplib: install compiled optimization model libraries (cnlp ABI) from the cnlplib registry.
+# cnlp: install compiled optimization model libraries (cnlp ABI) from the cnlplib registry.
 #
-#   cnlplib list               available libraries for this platform, and what is installed
-#   cnlplib install NAME...    install or update libraries (into $CNLPLIB_HOME/lib/NAME) or
+#   cnlp list               available libraries for this platform, and what is installed
+#   cnlp install NAME...    install or update libraries (into $CNLPLIB_HOME/lib/NAME) or
 #                             data sets (into $CNLPLIB_HOME/data/NAME); a library brings
 #                             the data sets it needs. NAME is the latest release,
 #                             NAME@nightly the rolling build of the default branch,
 #                             NAME@1.2.3 that version
-#   cnlplib up                 update everything installed (a pinned version stays)
-#   cnlplib remove NAME...     remove installed libraries or data sets
-#   cnlplib path               print the library directory (for CNLPLIB_PATH)
+#   cnlp up                 update everything installed (a pinned version stays)
+#   cnlp remove NAME...     remove installed libraries or data sets
+#   cnlp path               print the library directory (for CNLPLIB_PATH)
 #
 # Environment: CNLPLIB_HOME (default ~/.cnlplib), CNLPLIB_INDEX (default the published index).
 set -eu
@@ -19,7 +19,7 @@ CNLPLIB_INDEX="${CNLPLIB_INDEX:-https://cnlplib.madsuite.org/index.tsv}"
 LIBDIR="$CNLPLIB_HOME/lib"
 DATADIR="$CNLPLIB_HOME/data"
 
-die() { echo "cnlplib: $*" >&2; exit 1; }
+die() { echo "cnlp: $*" >&2; exit 1; }
 
 platform() {
     case "$(uname -s)" in
@@ -82,7 +82,7 @@ install_one() {
         nightly) line="$(lookup "$n@nightly")" ;;
         *) line="$(lookup "$n")" ;;
     esac
-    [ -n "$line" ] || die "no '$req' for $PLAT in the index (see: cnlplib list)"
+    [ -n "$line" ] || die "no '$req' for $PLAT in the index (see: cnlp list)"
     # data sets it needs first (sh has no locals: re-read this entry's fields afterwards)
     for r in $(printf '%s' "$line" | cut -f8 | tr ',' ' '); do install_one "$r"; done
     req="$1"; n="${req%%@*}"; sel=""
@@ -132,7 +132,7 @@ install_one() {
 }
 
 cmd_install() {
-    [ "$#" -gt 0 ] || die "usage: cnlplib install NAME..."
+    [ "$#" -gt 0 ] || die "usage: cnlp install NAME..."
     fetch_index
     for n in "$@"; do install_one "$n"; done
     rm -f "$INDEX"
@@ -155,7 +155,7 @@ cmd_up() {
 }
 
 cmd_remove() {
-    [ "$#" -gt 0 ] || die "usage: cnlplib remove NAME..."
+    [ "$#" -gt 0 ] || die "usage: cnlp remove NAME..."
     for n in "$@"; do
         if [ -d "$LIBDIR/$n" ]; then rm -rf "${LIBDIR:?}/$n"
         elif [ -d "$DATADIR/$n" ]; then rm -rf "${DATADIR:?}/$n"
@@ -172,5 +172,5 @@ case "${1:-}" in
     remove|uninstall) shift; cmd_remove "$@" ;;
     path) echo "$LIBDIR" ;;
     ""|-h|--help|help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' ;;
-    *) die "unknown command '$1' (see: cnlplib help)" ;;
+    *) die "unknown command '$1' (see: cnlp help)" ;;
 esac

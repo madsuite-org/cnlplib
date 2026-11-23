@@ -22,7 +22,7 @@ jobs:
       - name: Check the shell scripts
         run: |
           sh -n install.sh
-          sh -n bin/cnlplib
+          sh -n bin/cnlp
 
   publish:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -44,8 +44,8 @@ jobs:
           python3 scripts/build_index.py
           cp install.sh site/install
           cp install.sh site/install.sh
-          cp bin/cnlplib site/cnlplib
-          printf '<!doctype html><meta charset="utf-8"><title>cnlplib</title><p>cnlplib registry. Install: <code>curl -fsSL https://cnlplib.madsuite.org/install | sh</code>. Index: <a href="index.json">index.json</a>. Source: <a href="https://github.com/madsuite-org/cnlplib">madsuite-org/cnlplib</a>.</p>\n' > site/index.html
+          cp bin/cnlp site/cnlp
+          printf '<!doctype html><meta charset="utf-8"><title>cnlplib</title><p>cnlplib: compiled nonlinear programs. Install the <code>cnlp</code> command: <code>curl -fsSL https://cnlplib.madsuite.org/install | sh</code>. Index: <a href="index.json">index.json</a>. Source: <a href="https://github.com/madsuite-org/cnlplib">madsuite-org/cnlplib</a>.</p>\n' > site/index.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
