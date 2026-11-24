@@ -36,9 +36,17 @@ int main(int argc, char** argv) {
         if (n < 0 || m < 0) { printf("%-24s FAILED to instantiate\n", p); failed = 1; continue; }
         double *x = calloc(n + 1, 8), *l = calloc(n + 1, 8), *u = calloc(n + 1, 8), *lc = calloc(m + 1, 8), *uc = calloc(m + 1, 8), f = NAN;
         int64_t st = ((int64_t (*)(int64_t, double*, double*, double*, double*, double*))SYM("meta"))(id, x, l, u, lc, uc);
-        st |= ((int64_t (*)(int64_t, const double*, double*))SYM("obj"))(id, x, &f);
+        int64_t (*ob)(int64_t, const double*, double*) = (int64_t (*)(int64_t, const double*, double*))SYM("obj");
+        st |= ob(id, x, &f);
+        const char* pt = "x0";
+        if (!st && !isfinite(f)) {
+            /* x0 can sit where the model is not finite (a log at a bound); like
+             * check-library.jl, try the point near it before failing */
+            for (int64_t i = 0; i < n; i++) x[i] += 0.1 * sin((double)(i + 1));
+            st |= ob(id, x, &f); pt = "near x0";
+        }
         if (st || !isfinite(f)) { printf("%-24s FAILED to evaluate\n", p); failed = 1; }
-        else { printf("%-24s ok: nvar %lld, ncon %lld, f(x0) = %g\n", p, (long long)n, (long long)m, f); evaluated++; }
+        else { printf("%-24s ok: nvar %lld, ncon %lld, f(%s) = %g\n", p, (long long)n, (long long)m, pt, f); evaluated++; }
         free(x); free(l); free(u); free(lc); free(uc);
     }
     printf("%d evaluated%s\n", evaluated, failed ? ", some FAILED" : "");
