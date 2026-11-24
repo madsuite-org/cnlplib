@@ -94,6 +94,10 @@ cnlp solve @nolib:x 1 > "$W/e.log" 2>&1 && bad "a missing library is refused" ||
 
 # ── cnlp up / remove ────────────────────────────────────────────────────────────
 cnlp up > "$W/u.log" 2>&1 && ok "cnlp up" || bad "cnlp up: $(cat "$W/u.log")"
+mkdir -p "$CNLPLIB_HOME/solvers/byhand/lib"     # a solver put there by hand: no release record
+cnlp up > "$W/u.log" 2>&1 && grep -q 'skipping byhand' "$W/u.log" && ok "cnlp up skips an entry installed by hand" || bad "cnlp up with an entry installed by hand: $(cat "$W/u.log")"
+cnlp list > "$W/l.log" 2>&1 && ok "cnlp list with an entry installed by hand" || bad "cnlp list with an entry installed by hand: $(cat "$W/l.log")"
+rm -rf "$CNLPLIB_HOME/solvers/byhand"
 cnlp remove cnlptest > /dev/null && [ ! -d "$CNLPLIB_HOME/lib/cnlptest" ] && ok "cnlp remove" || bad "cnlp remove"
 
 echo "$pass passed, $fail failed"
