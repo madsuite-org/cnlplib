@@ -34,11 +34,22 @@ for model in CL.available_models(lib)
     end
     try
         h = CNLPModel(lib, model, args...)
-        x = h.meta.x0 .+ 0.1 .* sin.(1:h.meta.nvar); y = cos.(1:h.meta.ncon)
-        f, g, c = obj(h, x), grad(h, x), cons(h, x)
-        J, H = jac_coord(h, x), hess_coord(h, x, y)
-        all(isfinite, (f, g..., c..., J..., H...)) || error("non-finite values at x0")
+        y = cos.(1:h.meta.ncon)
+        evaluate(x) = (obj(h, x), grad(h, x), cons(h, x), jac_coord(h, x), hess_coord(h, x, y))
+        finite(v) = all(isfinite, (v[1], Iterators.flatten(v[2:end])...))
+        # Near x0 first, so the values do not depend on x0 being special. Some models are
+        # defined only on part of the space (a log, a square root), and the perturbed point
+        # can leave it; x0 itself is where a solver starts, so it is checked before failing.
+        x = h.meta.x0 .+ 0.1 .* sin.(1:h.meta.nvar)
+        v = evaluate(x)
         msg = "nvar $(h.meta.nvar), ncon $(h.meta.ncon)"
+        if !finite(v)
+            x = copy(h.meta.x0)
+            v = evaluate(x)
+            finite(v) || error("non-finite values at x0 and near it")
+            msg *= ", at x0"
+        end
+        f, g, c, J, H = v
         devp = Libdl.dlsym(lib.handle, Symbol(model, "_device"); throw_error = false)
         if gpu && devp !== nothing
             d = CNLPModel(lib, model, args...; device = :cuda)
