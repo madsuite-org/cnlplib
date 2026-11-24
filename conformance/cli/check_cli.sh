@@ -107,6 +107,7 @@ cnlp solve @cnlptest:ps small $S > "$W/e.log" 2>&1 && bad "only the exact data-s
 cnlp solve @cnlptest:pn 6 --device cuda $S > "$W/e.log" 2>&1 && bad "--device cuda without a device tier is refused" || { grep -q 'no CUDA tier' "$W/e.log" && ok "--device cuda without a device tier is refused" || bad "device message: $(cat "$W/e.log")"; }
 cnlp solve @cnlptest:pn 6 --device tpu $S > "$W/e.log" 2>&1 && bad "an unknown device is refused" || { grep -q 'auto, cpu or cuda' "$W/e.log" && ok "an unknown device is refused" || bad "unknown device message: $(cat "$W/e.log")"; }
 cnlp solve @cnlptest:pn 6 $S > "$W/s.log" 2>&1 && grep -q '(cpu)' "$W/s.log" && ok "without a device tier the solve runs on the cpu, and says so" || bad "cpu solve: $(cat "$W/s.log")"
+grep -q '^times: load model library [0-9.]* s, instantiate [0-9.]* s, load solver [0-9.]* s, solve [0-9.]* s, write [0-9.]* s, total [0-9.]* s$' "$W/s.log" && ok "a solve reports where its time went" || bad "times line: $(cat "$W/s.log")"
 cnlp solve @cnlptest:pb 5 > "$W/e.log" 2>&1 && bad "a wrong number of arguments is refused" || { grep -q 'takes 2' "$W/e.log" && ok "a wrong number of arguments is refused" || bad "argument count message: $(cat "$W/e.log")"; }
 cnlp solve @nolib:x 1 > "$W/e.log" 2>&1 && bad "a missing library is refused" || { grep -q 'cnlp install' "$W/e.log" && ok "a missing library is refused, with what to install" || bad "missing library message: $(cat "$W/e.log")"; }
 # Python: cnlplib.solve loads the installed solver in-process and hands it the library's functions

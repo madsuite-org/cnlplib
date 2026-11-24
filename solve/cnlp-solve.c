@@ -309,8 +309,11 @@ static void usage(void) {
 
 #include "privatize.h"
 
+static double now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + 1e-9 * t.tv_nsec; }
+
 int main(int argc, char** argv) {
     if (argc >= 2 && !strcmp(argv[1], "--privatize")) return privatize(argc - 2, argv + 2);
+    double t_start = now();
     if (argc < 2 || !strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) { usage(); return argc < 2; }
     const char *libspec = NULL, *start = NULL, *solver = "ipopt", *device = "auto";
     char *pos[64], *outs[16], *keys[128], *vals[128]; int npos = 0, nout = 0, nopt = 0;
@@ -331,6 +334,7 @@ int main(int argc, char** argv) {
     char* c = strrchr(spec, ':');
     if (c && !strchr(c, '/')) { snprintf(model, sizeof model, "%s", c + 1); *c = 0; }
     resolve_lib(spec, lib);
+    double t_lib0 = now();
     LIB = dlopen(lib, RTLD_NOW | RTLD_LOCAL);
     if (!LIB) die("cannot load %s: %s", lib, dlerror());
     int64_t (*abi)(void) = dlsym(LIB, "cnlp_abi_version");
@@ -350,6 +354,7 @@ int main(int argc, char** argv) {
         list_models(spec, nm, mn); exit(1);
     }
 
+    double t_lib = now() - t_lib0, t_inst0 = now();
     int64_t id = instantiate(npos, pos);
     if (id <= 0) die("`%s` could not be instantiated from the given arguments", PRE);
     instance M = { id, need("obj"), need("grad"), need("cons"), need("jac_structure"), need("jac"),
@@ -378,7 +383,9 @@ int main(int argc, char** argv) {
                        m_obj, m_grad, m_cons, m_js, m_jac, m_hs, m_hess };
     cnlp_result R = { calloc(n + 1, 8), calloc(m + 1, 8), calloc(n + 1, 8), calloc(n + 1, 8), 0, CNLP_ERROR, -1, "" };
 
+    double t_inst = now() - t_inst0, t_sol0 = now();
     char spath[PATH_MAX]; void* sh = load_solver(solver, spath);
+    double t_sol = now() - t_sol0;
     int64_t (*solve)(const cnlp_problem*, int64_t, const char* const*, const char* const*, cnlp_result*) = dlsym(sh, "cnlp_solve");
     char sname[64]; int64_t (*sn)(uint8_t*, int64_t) = dlsym(sh, "cnlp_solver_name");
     int64_t L = sn ? sn((uint8_t*)sname, sizeof sname - 1) : 0; sname[L > 0 ? L : 0] = 0;
@@ -418,6 +425,7 @@ int main(int argc, char** argv) {
     void* rep_s = sym("report_solution");
     if (rep_s) { rep_sol a = { id, rep_s, &R, STATUS[R.status >= 0 && R.status <= 6 ? R.status : 6] }; print_report(call_sol, &a); }
 
+    double t_out0 = now();
     for (int k = 0; k < nout; k++) {
         char wr[128] = ""; const char* path = outs[k]; const char* rest = split_prefix(outs[k], wr);
         if (rest && strcmp(wr, "cnlp") && has_writer(id, wr)) path = rest;
@@ -440,5 +448,12 @@ int main(int argc, char** argv) {
         }
         printf("wrote %s%s%s\n", path, wr[0] ? " with " : "", wr);
     }
+    /* where the time went: the model library's load (dlopen; a runtime it carries starts on
+     * its first call, in instantiate), instantiating the model (and reading a start), loading
+     * the solver (and what it does when it loads, such as warming up a GPU), the solve, and
+     * writing the outputs; total from the start of this program to here */
+    double t_out = now() - t_out0;
+    printf("times: load model library %.3f s, instantiate %.3f s, load solver %.3f s, solve %.3f s, write %.3f s, total %.3f s\n",
+           t_lib, t_inst, t_sol, secs, t_out, now() - t_start);
     return R.status <= CNLP_ACCEPTABLE ? 0 : 1;
 }
