@@ -99,6 +99,18 @@ A model with reports prints them around the solve: what the instance is, before 
 summary of the solution after it (for an optimal power flow, its constraint violations by
 group, say), as the model's library defines them.
 
+After the solve, `cnlp solve` reports where the time went:
+
+```
+times: load model library 0.024 s, instantiate 0.002 s, load solver 2.233 s, solve 0.385 s, write 0.000 s, total 2.644 s
+```
+
+*load model library* is loading the model's shared library; a runtime it carries starts on
+its first call, so it shows in *instantiate*, which also includes reading the instance's data
+and a start. *load solver* includes what the solver does when it loads, such as starting its
+runtime and warming up a GPU. *solve* is the call to the solver alone, and *total* runs from
+the start of `cnlp solve` to the end of writing the outputs.
+
 **`-s START`** warm-starts from `reader:path` (one of the model's start readers, such as a
 solved case) or from a cnlp-solution HDF5 file written by an earlier solve; the start's
 sizes must match the model.
