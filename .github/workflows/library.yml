@@ -137,10 +137,10 @@ jobs:
         run: |
           cc -std=c99 -O2 -o smoke cnlplib/scripts/smoke.c -ldl -lm
           mkdir unpacked && tar -xzf "${{ inputs.name }}-${{ matrix.variant.platform }}.tar.gz" -C unpacked
-          # as installed: the shared runtime unpacked beside it and linked in
-          rt=$(sed -n 's/^runtime = //p' "unpacked/${{ inputs.name }}/RUNTIME")
-          tar -xzf "$rt.tar.gz" -C unpacked
-          sh cnlplib/scripts/link-runtime.sh "unpacked/${{ inputs.name }}" "unpacked/$rt"
+          # as installed: its shared artifacts unpacked beside it and linked in
+          mkdir artifacts
+          while read -r a t; do tar -xzf "$a.artifact.tar.gz" -C artifacts; done < "unpacked/${{ inputs.name }}/ARTIFACTS"
+          sh cnlplib/scripts/link-artifacts.sh "unpacked/${{ inputs.name }}" artifacts
           env -i PATH=/usr/bin:/bin ./smoke "unpacked/${{ inputs.name }}/lib/lib${{ inputs.name }}.so" "${{ inputs.check-size }}"
       - name: Sources of the GPL and LGPL libraries in the runtime
         # once per release: every variant carries the same runtime
@@ -153,7 +153,7 @@ jobs:
           # directory at publish, where two files of one name would overwrite each other)
           path: |
             ${{ inputs.name }}-${{ matrix.variant.platform }}.tar.gz
-            runtime-*.tar.gz
+            *.artifact.tar.gz
             ${{ inputs.name }}-sources-gpl.tar
 
   chunk:
@@ -245,10 +245,10 @@ jobs:
         run: |
           cc -std=c99 -O2 -o smoke cnlplib/scripts/smoke.c -ldl -lm
           mkdir unpacked && tar -xzf "${{ inputs.name }}-${{ matrix.variant.platform }}.tar.gz" -C unpacked
-          # as installed: the shared runtime unpacked beside it and linked in
-          rt=$(sed -n 's/^runtime = //p' "unpacked/${{ inputs.name }}/RUNTIME")
-          tar -xzf "$rt.tar.gz" -C unpacked
-          sh cnlplib/scripts/link-runtime.sh "unpacked/${{ inputs.name }}" "unpacked/$rt"
+          # as installed: its shared artifacts unpacked beside it and linked in
+          mkdir artifacts
+          while read -r a t; do tar -xzf "$a.artifact.tar.gz" -C artifacts; done < "unpacked/${{ inputs.name }}/ARTIFACTS"
+          sh cnlplib/scripts/link-artifacts.sh "unpacked/${{ inputs.name }}" artifacts
           env -i PATH=/usr/bin:/bin ./smoke "unpacked/${{ inputs.name }}/lib/lib${{ inputs.name }}.so" "${{ inputs.check-size }}"
       - name: Sources of the GPL and LGPL libraries in the runtime
         # once per release: every variant carries the same runtime
@@ -261,7 +261,7 @@ jobs:
           # directory at publish, where two files of one name would overwrite each other)
           path: |
             ${{ inputs.name }}-${{ matrix.variant.platform }}.tar.gz
-            runtime-*.tar.gz
+            *.artifact.tar.gz
             ${{ inputs.name }}-sources-gpl.tar
 
   publish:
@@ -304,6 +304,6 @@ jobs:
             gh release create nightly -R "$REPO" --prerelease --title "Nightly" --notes "$notes"
           fi
           gh release upload nightly -R "$REPO" --clobber dist/*.tar.gz dist/*.tar dist/SHA256SUMS
-          # a runtime this build no longer uses (its name is its content hash) is dropped
-          gh release view nightly -R "$REPO" --json assets -q '.assets[].name' | { grep '^runtime-.*\.tar\.gz$' || true; } |
+          # an artifact this build no longer uses (its name has its content hash) is dropped
+          gh release view nightly -R "$REPO" --json assets -q '.assets[].name' | { grep '\.artifact\.tar\.gz$' || true; } |
             while read -r a; do [ -e "dist/$a" ] || gh release delete-asset nightly "$a" -R "$REPO" -y; done

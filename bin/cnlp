@@ -163,25 +163,29 @@ install_one() {
         lib) ls "$src/lib/lib$n".* >/dev/null 2>&1 || die "the asset for $req has no lib/lib$n.<ext>" ;;
         solver) ls "$src/lib/libcnlp_$n".* >/dev/null 2>&1 || die "the asset for $req has no lib/libcnlp_$n.<ext>" ;;
     esac
-    # a library sharing a runtime (RUNTIME): fetch it once, from the same release, and link it in
-    if [ -f "$src/RUNTIME" ]; then
-        rt="$(sed -n 's/^runtime = //p' "$src/RUNTIME")"
-        case "$rt" in runtime-[0-9a-f]*) ;; *) die "the asset for $req names no valid runtime" ;; esac
-        if [ ! -d "$ARTDIR/$rt" ]; then
-            rurl="${url%/*}/$rt.tar.gz"
-            rwant="$(curl -fsSL "${url%/*}/SHA256SUMS" 2>/dev/null | awk -v f="$rt.tar.gz" '$2 == f || $2 == "*" f { print $1 }')"
-            [ -n "$rwant" ] || die "no checksum for $rt.tar.gz in ${url%/*}/SHA256SUMS"
-            echo "Installing the shared runtime $rt"
-            curl -fSL --progress-bar "$rurl" -o "$stage/runtime.tar.gz" || die "download failed: $rurl"
-            [ "$(sha256 "$stage/runtime.tar.gz")" = "$rwant" ] || die "checksum mismatch for $rt"
-            mkdir -p "$ARTDIR"; rstage="$(mktemp -d "$ARTDIR/.stage-$rt.XXXXXX")"
-            tar -xzf "$stage/runtime.tar.gz" -C "$rstage"
-            [ -d "$rstage/$rt/julia" ] || { rm -rf "$rstage"; die "$rt.tar.gz has no $rt/julia"; }
-            mv "$rstage/$rt" "$ARTDIR/$rt" 2>/dev/null || [ -d "$ARTDIR/$rt" ] || die "could not install $rt"
-            rm -rf "$rstage"
-        fi
-        mkdir -p "$src/lib/julia"
-        for f in $(ls -A "$ARTDIR/$rt/julia"); do ln -sfn "$ARTDIR/$rt/julia/$f" "$src/lib/julia/$f"; done
+    # shared artifacts (ARTIFACTS: `NAME-HASH TARGET` lines): each fetched once, from the same
+    # release, into $ARTDIR/NAME-HASH, and its files linked into the library's TARGET
+    if [ -f "$src/ARTIFACTS" ]; then
+        while read -r a t; do
+            [ -n "$a" ] || continue
+            printf '%s' "$a" | grep -Eq '^[a-z0-9_]+-[0-9a-f]{16,64}$' || die "the asset for $req names an invalid artifact '$a'"
+            case "/$t/" in */../*|//*) die "the asset for $req links $a into '$t', outside the library" ;; esac
+            if [ ! -d "$ARTDIR/$a" ]; then
+                aurl="${url%/*}/$a.artifact.tar.gz"
+                awant="$(curl -fsSL "${url%/*}/SHA256SUMS" 2>/dev/null | awk -v f="$a.artifact.tar.gz" '$2 == f || $2 == "*" f { print $1 }')"
+                [ -n "$awant" ] || die "no checksum for $a.artifact.tar.gz in ${url%/*}/SHA256SUMS"
+                echo "Installing the shared artifact $a"
+                curl -fSL --progress-bar "$aurl" -o "$stage/artifact.tar.gz" || die "download failed: $aurl"
+                [ "$(sha256 "$stage/artifact.tar.gz")" = "$awant" ] || die "checksum mismatch for $a"
+                mkdir -p "$ARTDIR"; astage="$(mktemp -d "$ARTDIR/.stage-$a.XXXXXX")"
+                tar -xzf "$stage/artifact.tar.gz" -C "$astage"
+                [ -d "$astage/$a" ] || { rm -rf "$astage"; die "$a.artifact.tar.gz has no top-level $a/"; }
+                mv "$astage/$a" "$ARTDIR/$a" 2>/dev/null || [ -d "$ARTDIR/$a" ] || die "could not install $a"
+                rm -rf "$astage"
+            fi
+            mkdir -p "$src/$t"
+            for f in $(ls -A "$ARTDIR/$a"); do ln -sfn "$ARTDIR/$a/$f" "$src/$t/$f"; done
+        done < "$src/ARTIFACTS"
     fi
     # the version the asset says it is, if it says
     v="$(sed -n 's/^version *= *//p' "$src/VERSION" 2>/dev/null | head -n 1)"; [ -n "$v" ] && ver="$v"

@@ -69,17 +69,21 @@ release's asset has a stable URL. Its single top-level directory is the bundle:
   LICENSE                 the models' license
   THIRD_PARTY_NOTICES     licenses of everything else in the bundle
   VERSION                 name, version, cnlp_abi, platform, device (key = value lines)
-  RUNTIME                 optional: the shared runtime it needs (runtime = runtime-HASH)
+  ARTIFACTS               optional: shared artifacts it needs, `NAME-HASH TARGET` per line
 ```
 
-A library whose runtime is shared ships it as a second asset, `runtime-HASH.tar.gz`, holding
-`runtime-HASH/julia/`: the runtime libraries that are the same in every library built with
-the same Julia (OpenBLAS, libgfortran, SuiteSparse, ...), HASH being over their names and
-bytes. The library keeps only what is its own (its image and its privatized `libjulia` and
-`libjulia-internal`). `cnlp install` fetches the runtime once, from the same release, into
-`~/.cnlplib/artifacts/runtime-HASH/`, and links each of its files into the library's
-`lib/julia/`; `scripts/package-library.sh` makes the split and `scripts/link-runtime.sh`
-does the linking for a check.
+A library can share files with other libraries through **artifacts**: archives named by a
+hash of their content, published in the same release as `NAME-HASH.artifact.tar.gz`
+(holding `NAME-HASH/`) and listed in the library's `ARTIFACTS` file as `NAME-HASH TARGET`
+lines. `cnlp install` fetches each once into `~/.cnlplib/artifacts/NAME-HASH/`, checks it
+against the release's `SHA256SUMS`, and links each of its files into the library's `TARGET`
+directory; a library installed later that names the same artifact reuses it.
+`scripts/link-artifacts.sh` does the linking for a check.
+
+`scripts/package-library.sh` makes the Julia runtime such an artifact: everything in
+`lib/julia` except each runtime's privatized `libjulia` and `libjulia-internal` (the same
+files in every library built with the same Julia: OpenBLAS, libgfortran, SuiteSparse, ...)
+becomes `julia-HASH`, linked into `lib/julia`, HASH being over the files' names and bytes.
 
 If the bundle carries GPL or LGPL libraries (a bundled Julia runtime does: SuiteSparse,
 GMP, MPFR), attach their corresponding source to the same release;
