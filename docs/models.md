@@ -69,7 +69,17 @@ release's asset has a stable URL. Its single top-level directory is the bundle:
   LICENSE                 the models' license
   THIRD_PARTY_NOTICES     licenses of everything else in the bundle
   VERSION                 name, version, cnlp_abi, platform, device (key = value lines)
+  RUNTIME                 optional: the shared runtime it needs (runtime = runtime-HASH)
 ```
+
+A library whose runtime is shared ships it as a second asset, `runtime-HASH.tar.gz`, holding
+`runtime-HASH/julia/`: the runtime libraries that are the same in every library built with
+the same Julia (OpenBLAS, libgfortran, SuiteSparse, ...), HASH being over their names and
+bytes. The library keeps only what is its own (its image and its privatized `libjulia` and
+`libjulia-internal`). `cnlp install` fetches the runtime once, from the same release, into
+`~/.cnlplib/artifacts/runtime-HASH/`, and links each of its files into the library's
+`lib/julia/`; `scripts/package-library.sh` makes the split and `scripts/link-runtime.sh`
+does the linking for a check.
 
 If the bundle carries GPL or LGPL libraries (a bundled Julia runtime does: SuiteSparse,
 GMP, MPFR), attach their corresponding source to the same release;

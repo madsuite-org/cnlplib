@@ -26,6 +26,7 @@ set -eu
 CNLPLIB_HOME="${CNLPLIB_HOME:-$HOME/.cnlplib}"
 CNLPLIB_INDEX="${CNLPLIB_INDEX:-https://cnlplib.madsuite.org/index.tsv}"
 LIBDIR="$CNLPLIB_HOME/lib"
+ARTDIR="$CNLPLIB_HOME/artifacts"
 DATADIR="$CNLPLIB_HOME/data"
 SOLVERDIR="$CNLPLIB_HOME/solvers"
 
@@ -162,6 +163,26 @@ install_one() {
         lib) ls "$src/lib/lib$n".* >/dev/null 2>&1 || die "the asset for $req has no lib/lib$n.<ext>" ;;
         solver) ls "$src/lib/libcnlp_$n".* >/dev/null 2>&1 || die "the asset for $req has no lib/libcnlp_$n.<ext>" ;;
     esac
+    # a library sharing a runtime (RUNTIME): fetch it once, from the same release, and link it in
+    if [ -f "$src/RUNTIME" ]; then
+        rt="$(sed -n 's/^runtime = //p' "$src/RUNTIME")"
+        case "$rt" in runtime-[0-9a-f]*) ;; *) die "the asset for $req names no valid runtime" ;; esac
+        if [ ! -d "$ARTDIR/$rt" ]; then
+            rurl="${url%/*}/$rt.tar.gz"
+            rwant="$(curl -fsSL "${url%/*}/SHA256SUMS" 2>/dev/null | awk -v f="$rt.tar.gz" '$2 == f || $2 == "*" f { print $1 }')"
+            [ -n "$rwant" ] || die "no checksum for $rt.tar.gz in ${url%/*}/SHA256SUMS"
+            echo "Installing the shared runtime $rt"
+            curl -fSL --progress-bar "$rurl" -o "$stage/runtime.tar.gz" || die "download failed: $rurl"
+            [ "$(sha256 "$stage/runtime.tar.gz")" = "$rwant" ] || die "checksum mismatch for $rt"
+            mkdir -p "$ARTDIR"; rstage="$(mktemp -d "$ARTDIR/.stage-$rt.XXXXXX")"
+            tar -xzf "$stage/runtime.tar.gz" -C "$rstage"
+            [ -d "$rstage/$rt/julia" ] || { rm -rf "$rstage"; die "$rt.tar.gz has no $rt/julia"; }
+            mv "$rstage/$rt" "$ARTDIR/$rt" 2>/dev/null || [ -d "$ARTDIR/$rt" ] || die "could not install $rt"
+            rm -rf "$rstage"
+        fi
+        mkdir -p "$src/lib/julia"
+        for f in $(ls -A "$ARTDIR/$rt/julia"); do ln -sfn "$ARTDIR/$rt/julia/$f" "$src/lib/julia/$f"; done
+    fi
     # the version the asset says it is, if it says
     v="$(sed -n 's/^version *= *//p' "$src/VERSION" 2>/dev/null | head -n 1)"; [ -n "$v" ] && ver="$v"
     echo "$ver $want $req" > "$src/.cnlplib-version"
