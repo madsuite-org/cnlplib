@@ -42,12 +42,6 @@ jobs:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: validate
     runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -65,9 +59,27 @@ jobs:
           cp install.sh site/install
           cp install.sh site/install.sh
           cp bin/cnlp site/cnlp
-      - uses: actions/configure-pages@v5
+      # Named per attempt: a re-run's upload would otherwise sit beside the earlier attempts'
+      # artifacts of the same name, and deploy-pages refuses more than one.
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+          name: github-pages-${{ github.run_attempt }}
+
+  # A job of its own: deploying in the job that uploaded, deploy-pages listed the run's
+  # artifacts before the upload was visible there ("Found 0 artifact(s)").
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
       - id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
