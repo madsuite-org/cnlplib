@@ -5,7 +5,8 @@
 #
 # Each CHUNK_BUNDLE is a bundle built by scripts/build-library.jl with CNLP_CHUNK set
 # (NAME_k/lib/libNAME_k.so, its Julia runtime, and MODELS). The bundles are merged into OUT
-# (a file present in two of them must be the same file), and libNAME.so is written: a small C
+# by moving their files (a file present in two of them must be the same file; the chunk
+# bundles are consumed), and libNAME.so is written: a small C
 # library that answers the library-level calls (cnlp_abi_version, cnlp_nmodels,
 # cnlp_model_name) for all the models, and lists every libNAME_k.so as a dependency. A symbol
 # looked up through a handle is also searched in the libraries that handle depends on, so
@@ -23,14 +24,17 @@ for B in "$@"; do
     # the dependency is recorded under the library's SONAME, which must be its file name
     S=$(readelf -d "$B/lib/lib$C.so" | sed -n 's/.*(SONAME).*\[\(.*\)\]/\1/p')
     [ -z "$S" ] || [ "$S" = "lib$C.so" ] || { echo "$B: SONAME $S is not lib$C.so"; exit 1; }
-    (cd "$B" && find . \( -type f -o -type l \) ! -name MODELS ! -path './share/*') | while read -r f; do
+    # the list first: the loop moves files out of the tree find would still be walking
+    L=$(mktemp); (cd "$B" && find . \( -type f -o -type l \) ! -name MODELS ! -path './share/*') > "$L"
+    while read -r f; do
         if [ -e "$OUT/$f" ] || [ -L "$OUT/$f" ]; then
             cmp -s "$B/$f" "$OUT/$f" || { echo "$f differs between chunks"; exit 1; }
         else
             mkdir -p "$OUT/$(dirname "$f")"
-            cp -a "$B/$f" "$OUT/$f"
+            mv "$B/$f" "$OUT/$f"
         fi
-    done
+    done < "$L"
+    rm -f "$L"
     cat "$B/MODELS" >> "$OUT/MODELS"
     LIBS="$LIBS -l:lib$C.so"
 done
