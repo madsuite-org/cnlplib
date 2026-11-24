@@ -1,0 +1,12 @@
+name        = "mittelmann"
+description = "Mittelmann's AMPL-NLP benchmark instances (the scored ones up to 100,000 variables), ExaMittelmann.jl"
+producer    = "ExaMittelmann.jl"
+homepage    = "https://github.com/madsuite-org/ExaMittelmann.jl"
+license     = "MIT"
+maintainers = ["sshin23"]
+models      = ["arki0003", "arki0009", "camshape_6400", "clnlbeam", "cont5_1_l", "cont5_2_1_l", "cont5_2_2_l", "cont5_2_3_l", "cont5_2_4_l", "corkscrw", "dirichlet120", "dtoc1nd", "dtoc2", "elec_400", "ex1_160", "ex4_2_160", "ex8_2_2", "ex8_2_3", "gasoil_3200", "henon120", "lane_emden120", "marine_1600", "narx_cfy", "optmass", "pinene_3200", "qcqp1000_1nc", "qcqp1000_2c", "qcqp1000_2nc", "qcqp1500_1c", "qcqp1500_1nc", "qcqp500_3c", "qcqp500_3nc", "qcqp750_2c", "qcqp750_2nc", "robot_1600", "robot_a", "robot_b", "robot_c", "rocket_12800", "steering_12800", "svanberg"]
+repo        = "madsuite-org/ExaMittelmann.jl"
+nightly     = true
+platforms   = ["linux-x86_64"]
+cnlp_abi    = "0.2"
+device      = ["cuda"]
