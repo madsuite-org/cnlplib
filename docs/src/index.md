@@ -28,16 +28,16 @@ exports plain C symbols to instantiate it and to evaluate its objective, gradien
 constraints, sparse Jacobian and Lagrangian Hessian. Any language that can call C can load
 the library and solve the models, with no modeling tool installed.
 
-- **[cnlp.h](../cnlp.h)**: the specification, version 0.2. The header is the normative
+- **[cnlp.h](../../cnlp.h)**: the specification, version 0.2. The header is the normative
   document: each contract is in its comments, and its macros declare every symbol for a
   model prefix, so an implementation is checked against the file it follows.
-- **[formats/](../formats/)**: the files that go with a library: the input a model is
-  instantiated from ([input.md](../formats/input.md)), parameter values
-  ([parameters.md](../formats/parameters.md)) and solutions ([solution.md](../formats/solution.md)),
+- **[formats/](../../formats/)**: the files that go with a library: the input a model is
+  instantiated from ([input.md](../../formats/input.md)), parameter values
+  ([parameters.md](../../formats/parameters.md)) and solutions ([solution.md](../../formats/solution.md)),
   in HDF5, and the number formats a model can be evaluated in
-  ([numbers.md](../formats/numbers.md)).
-- **[example/](../example/)**: a complete model library and a consumer in plain C;
-  **[conformance/](../conformance/)**: reference files and their check.
+  ([numbers.md](../../formats/numbers.md)).
+- **[example/](../../example/)**: a complete model library and a consumer in plain C;
+  **[conformance/](../../conformance/)**: reference files and their check.
 
 A model always has the core symbols (sizes, bounds, starting point, evaluation). Optional
 tiers add a library-level model list, instantiation from structured data, named blocks of
@@ -54,11 +54,11 @@ and works without the tiers a library does not export.
   takes the CUDA build on a machine with an NVIDIA GPU (`--device cpu|cuda` chooses).
   Libraries built on one Julia version share its runtime as an artifact, installed once.
   cnlplib does not rehost binaries.
-- [libraries/](../libraries/) lists them, one TOML file each, naming the repository that
+- [libraries/](../../libraries/) lists them, one TOML file each, naming the repository that
   releases it. It lists no versions, so a release needs no change here; `cnlp` checks every
-  download against the release's `SHA256SUMS`. [data/](../data/) lists data sets.
+  download against the release's `SHA256SUMS`. [data/](../../data/) lists data sets.
 - Model packages build and publish their releases with one reusable workflow,
-  [`.github/workflows/library.yml`](../.github/workflows/library.yml).
+  [`.github/workflows/library.yml`](../../.github/workflows/library.yml).
 - CI validates every entry and publishes the index and the installer to
   `https://cnlplib.madsuite.org/`.
 
@@ -68,11 +68,11 @@ To publish a model library, see [docs/models.md](models.md).
 
 `cnlp solve` finds and instantiates a model, applies a warm start (`-s`), calls a solver,
 and writes the solution (`-o`: the model's own format, or the standard HDF5 file). A
-solver implements one small interface, [cnlp_solver.h](../cnlp_solver.h), and never sees a
+solver implements one small interface, [cnlp_solver.h](../../cnlp_solver.h), and never sees a
 file or a model format (a GPU solver also receives the model's device callbacks, and
-`--device` chooses where a solve runs); [solvers/](../solvers/) lists the installable ones. Ipopt is the
-reference solver ([adapters/ipopt/](../adapters/ipopt/)), and
-[example/solver.c](../example/solver.c) is a template. To add a solver, see
+`--device` chooses where a solve runs); [solvers/](../../solvers/) lists the installable ones. Ipopt is the
+reference solver ([adapters/ipopt/](../../adapters/ipopt/)), and
+[example/solver.c](../../example/solver.c) is a template. To add a solver, see
 [docs/solvers.md](solvers.md).
 
 ```sh
