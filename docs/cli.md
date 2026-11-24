@@ -24,12 +24,16 @@ cnlp list                     # what the registry has for this platform, and wha
 cnlp install lv ipopt         # a model library and a solver
 cnlp install lv@nightly       # the latest build of the library's default branch
 cnlp install lv@1.2.3         # a specific version
+cnlp install --device cpu lv  # the host build even on a GPU machine
 cnlp up                       # update everything installed (a pinned version stays)
 cnlp remove lv                # remove it
 cnlp path                     # the library directory
 ```
 
 `cnlp list` shows each library's and solver's release and backends (`cpu`, `cuda`, ...).
+A library is published per backend; `cnlp install` takes the CUDA build when `nvidia-smi`
+lists a GPU and the host (CPU) build otherwise, and falls back to the host build when a
+release has no device build. `--device cpu|cuda` (or `CNLPLIB_DEVICE`) chooses instead.
 Installing a library also installs the data sets it needs. Every download is checked
 against the `SHA256SUMS` published with it; an install is swapped into place only once it
 is complete.

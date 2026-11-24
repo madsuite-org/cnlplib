@@ -117,7 +117,12 @@ def main():
                 req = ",".join(e.get("data", []))
                 n = e["name"]
                 be = ",".join(e["backends"] if kind == "solver" else ["cpu", *e.get("device", [])])
-                for plat in sorted(e["platforms"]):
+                # a library is published per backend: `<platform>` holds the host (CPU) tier only,
+                # `<platform>-<device>` the host tier and that device tier
+                variants = [(plat, be if kind == "solver" else "cpu") for plat in sorted(e["platforms"])]
+                if kind == "lib" and "url" not in e:
+                    variants += [(f"{plat}-{d}", f"cpu,{d}") for plat in sorted(e["platforms"]) for d in e.get("device", [])]
+                for plat, be in variants:
                     asset = f"{n}-{plat}.tar.gz"
                     if "url" in e:
                         f.write(f"{n}\t{e.get('label', 'fixed')}\t{plat}\t{e['url'].replace('{platform}', plat)}\t-\t{desc}\t{kind}\t{req}\t-\t{be}\n")
