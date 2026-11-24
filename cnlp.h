@@ -16,6 +16,7 @@
  *     CNLP_DECLARE_SENSE(P)          objective sense (0.2)
  *     CNLP_DECLARE_WRITERS(P)        solution writers (0.2)
  *     CNLP_DECLARE_READERS(P)        the model's own input formats (0.2)
+ *     CNLP_DECLARE_REPORTS(P)        text about an instance and a solution (0.2)
  *     CNLP_DECLARE_DEVICE(P)         GPU evaluation (0.2)
  *     CNLP_DECLARE_SINGLE(P)         binary32 evaluation (0.2)
  *     CNLP_DECLARE_FORMATS(P)        other number formats (0.2)
@@ -161,6 +162,21 @@ int64_t cnlp_abi_version(void);
     int64_t P##_reader_name(int64_t k, uint8_t* buf, int64_t cap);            \
     int64_t P##_reader_kind(int64_t k);                                       \
     int64_t P##_default_reader(uint8_t* buf, int64_t cap);
+
+/* ── Reports (0.2; optional; witness: P##_report_instance) ────────────────
+ * Text for a person: about the instance, before a solve (its size, what it was built
+ * from), and about a solution, after it (a summary, the constraint violations by group,
+ * ...).  Copied out like every string: the length is returned, at most cap bytes are
+ * written, and cap 0 sizes it; 0 = nothing to report, -1 = invalid id.  The arrays and
+ * status are a writer's (host arrays, the sign convention of formats/solution.md, status
+ * may be NULL).  The consumer decides where the text goes; `cnlp solve` prints the
+ * instance report before solving and the solution report after. */
+#define CNLP_DECLARE_REPORTS(P)                                               \
+    int64_t P##_report_instance(int64_t id, uint8_t* buf, int64_t cap);       \
+    int64_t P##_report_solution(int64_t id, const double* x, const double* y, \
+                                const double* zl, const double* zu,           \
+                                double objective, const char* status,         \
+                                uint8_t* buf, int64_t cap);
 
 /* ── Device evaluation (0.2; optional; witness: P##_device) ───────────────
  * P##_device(id): 1 = CUDA, device 0's primary context; -1 invalid id.
