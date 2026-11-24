@@ -78,31 +78,54 @@ lookup() { lookup_all "$1" | head -n 1; }
 # what is installed: "<version> <sha256> <request>"
 installed() { cat "$LIBDIR/$1/.cnlplib-version" "$SOLVERDIR/$1/.cnlplib-version" "$DATADIR/$1/.cnlplib-version" 2>/dev/null | head -n 1; }
 
-list_dir() {
-    found=0
-    if [ -d "$1" ]; then
-        for d in "$1"/*/; do
+# what is installed, one line per entry: "<name>\t<release>[ (<device>)]"
+installed_list() {
+    for dir in "$LIBDIR" "$SOLVERDIR" "$DATADIR"; do
+        [ -d "$dir" ] || continue
+        for d in "$dir"/*/; do
             [ -d "$d" ] || continue
-            n="$(basename "$d")"; i="$(cat "$d/.cnlplib-version" 2>/dev/null)"
-            printf "  %-14s %-16s %s\n" "$n" "${i%% *}" "$(printf '%s' "$i" | cut -d' ' -f3)"; found=1
+            n="$(basename "$d")"; v="$(cut -d' ' -f1 "$d/.cnlplib-version" 2>/dev/null || true)"
+            dev="$(sed -n 's/^device = //p' "$d/VERSION" 2>/dev/null || true)"
+            printf '%s\t%s%s\n' "$n" "${v:-by hand}" "${dev:+ ($dev)}"
         done
-    fi
-    [ "$found" = 1 ] || echo "  (none)"
+    done
+}
+
+# One row per name of a kind (lib, solver, data): its releases and backends merged, what is
+# installed, and the description cut to the terminal's width.
+list_table() {  # kind platform-prefix (empty: platform-independent) installed-file
+    awk -F'\t' -v kind="$1" -v p="$2" -v inst="$3" -v width="${COLUMNS:-100}" '
+        BEGIN { while ((getline l < inst) > 0) { split(l, f, "\t"); have[f[1]] = f[2] } }
+        $7 == kind && (p == "" ? $3 == "any" : index($3, p) == 1) {
+            n = $1; sub(/@.*/, "", n)
+            if (!(n in desc)) { order[++k] = n; desc[n] = $6 }
+            if (index(" " rel[n] " ", " " $2 " ") == 0) rel[n] = rel[n] (rel[n] == "" ? "" : " ") $2
+            m = split($10, b, ",")
+            for (i = 1; i <= m; i++)
+                if (b[i] != "-" && b[i] != "" && index(" " be[n] " ", " " b[i] " ") == 0)
+                    be[n] = be[n] (be[n] == "" ? "" : " ") b[i]
+        }
+        END {
+            if (!k) { print "  (none yet)"; exit }
+            printf "  %-12s %-16s %-10s %-16s %s\n", "NAME", "RELEASES", "BACKENDS", "INSTALLED", "DESCRIPTION"
+            room = width - 2 - 13 - 17 - 11 - 17; if (room < 20) room = 20
+            for (j = 1; j <= k; j++) {
+                n = order[j]; r = rel[n]; gsub(/ /, ", ", r); e = be[n]; gsub(/ /, ",", e)
+                if (e == "") e = "-"
+                d = desc[n]; sub(/, [A-Za-z0-9]+\.jl$/, "", d)
+                if (length(d) > room) d = substr(d, 1, room - 3) "..."
+                printf "  %-12s %-16s %-10s %-16s %s\n", n, r, e, (n in have) ? have[n] : "-", d
+            }
+        }' "$INDEX"
 }
 
 cmd_list() {
     fetch_index
-    echo "Libraries for $PLAT (from $CNLPLIB_INDEX):"
-    printf "  %-14s %-10s %-10s %s\n" NAME RELEASE BACKENDS DESCRIPTION
-    awk -F'\t' -v p="$PLAT" 'index($3, p) == 1 && $7 == "lib" { printf "  %-14s %-10s %-10s %s\n", $1, $2, $10, $6; n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
-    echo "Solvers:"
-    awk -F'\t' -v p="$PLAT" '$3 == p && $7 == "solver" { printf "  %-14s %-10s %-10s %s\n", $1, $2, $10, $6; n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
-    echo "Data sets:"
-    awk -F'\t' '$3 == "any" { printf "  %-14s %-16s %s\n", $1, $2, $6; n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
-    echo "Installed in $LIBDIR:"; list_dir "$LIBDIR"
-    echo "Installed in $SOLVERDIR:"; list_dir "$SOLVERDIR"
-    echo "Installed in $DATADIR:"; list_dir "$DATADIR"
-    rm -f "$INDEX"
+    inst="$(mktemp "${TMPDIR:-/tmp}/cnlplib-inst.XXXXXX")"; installed_list > "$inst"
+    echo "Libraries for $PLAT:"; list_table lib "$PLAT" "$inst"
+    echo "Solvers:"; list_table solver "$PLAT" "$inst"
+    echo "Data sets:"; list_table data "" "$inst"
+    rm -f "$INDEX" "$inst"
 }
 
 # NAME-HASH.artifact.tar.gz from a release directory URL, checked against its SHA256SUMS
