@@ -68,7 +68,7 @@ models:
 
 ```sh
 cnlp solve @lv:wood 10000
-cnlp solve ./build/mymodels/lib/libmymodels.so:acp case118_ieee
+cnlp solve ./build/mymodels/lib/libmymodels.so:acp pglib_opf_case118_ieee
 ```
 
 **`INSTANCE...`** is what the model is built from. The model declares what it takes
@@ -78,12 +78,22 @@ cnlp solve ./build/mymodels/lib/libmymodels.so:acp case118_ieee
 |---|---|---|
 | nothing (a fixed model) | nothing | `cnlp solve @cutest:ROSENBR` |
 | one integer | the integer | `cnlp solve @lv:wood 10000` |
-| a file | a path, or the name of a file in an installed data set | `cnlp solve @emp:acp case118_ieee` |
+| a file | a path, or the name of a file in an installed data set | `cnlp solve @emp:acp pglib_opf_case118_ieee` |
 | a file in another format the model reads | `reader:path` | `cnlp solve @emp:acp psse:grid.raw` |
 | several values (the builder) | one value per field, in order | `cnlp solve @cops:bearing 50 50` |
 
-A data-set file is found by its name, its name without extension, or a part following
-an underscore (`case118_ieee` finds `pglib_opf_case118_ieee.m`).
+A data-set file is found by its full name, with or without the extension
+(`pglib_opf_case118_ieee` finds `pglib/pglib_opf_case118_ieee.m`); nothing shorter is
+matched. A name that matches no file is an error, listing the installed files whose names
+contain it:
+
+```
+$ cnlp solve @emp:acp case118
+cnlp solve: no file `case118`: not a path, and no installed data-set file of that name; did you mean
+  pglib_opf_case118_ieee  (pglib/pglib_opf_case118_ieee.m)
+  pglib_opf_case118_ieee__api  (pglib/api/pglib_opf_case118_ieee__api.m)
+  pglib_opf_case118_ieee__sad  (pglib/sad/pglib_opf_case118_ieee__sad.m)
+```
 
 **`-s START`** warm-starts from `reader:path` (one of the model's start readers, such as a
 solved case) or from a cnlp-solution HDF5 file written by an earlier solve; the start's
