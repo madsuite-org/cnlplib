@@ -187,7 +187,9 @@ jobs:
           CNLP_CHUNK: ${{ matrix.chunk }}/${{ inputs.chunks }}
         run: julia --startup-file=no cnlplib/scripts/build-library.jl package "${{ inputs.name }}" build ${{ matrix.variant.device }}
       - name: Pack the chunk
-        run: tar -C build -cf "chunk-${{ matrix.chunk }}.tar" "${{ inputs.name }}_${{ matrix.chunk }}"
+        # without share/: the artifacts juliac bundles there (pocl alone is ~300 MB) are not
+        # packed into the library, so carrying them to the join only costs time
+        run: tar -C build --exclude "${{ inputs.name }}_${{ matrix.chunk }}/share" -cf "chunk-${{ matrix.chunk }}.tar" "${{ inputs.name }}_${{ matrix.chunk }}"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.name }}-chunk-${{ matrix.variant.name }}-${{ matrix.chunk }}
@@ -235,7 +237,7 @@ jobs:
       - name: Join the chunks
         run: |
           mkdir -p build/chunks
-          for t in chunks/chunk-*.tar; do tar -C build/chunks -xf "$t"; done
+          for t in chunks/chunk-*.tar; do tar -C build/chunks -xf "$t" && rm "$t"; done
           sh cnlplib/scripts/assemble-chunks.sh "${{ inputs.name }}" "build/${{ inputs.name }}" build/chunks/${{ inputs.name }}_*
       - name: Check
         run: julia --startup-file=no cnlplib/scripts/check-library.jl "build/${{ inputs.name }}/lib/lib${{ inputs.name }}.so" "${{ inputs.check-size }}"
