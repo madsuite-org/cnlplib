@@ -55,6 +55,28 @@ unknown) and `solver_status` (your own status, as text).
   the result arrays are the caller's. Do not keep pointers after returning.
 - **Never** exit, abort or throw across the boundary; report through the return value.
 
+### On a GPU (interface 0.2)
+
+A solver that runs on a GPU also exports
+
+```c
+int64_t cnlp_solve_device(const cnlp_problem* problem, const cnlp_device_problem* device,
+                          int64_t noptions, const char* const* keys, const char* const* values,
+                          cnlp_result* result);
+```
+
+`device->device` is the memory space (`CNLP_DEVICE_CUDA`), and `device->obj_d`, `grad_d`,
+`cons_d`, `jac_d`, `hess_d` are the model's evaluations on device pointers (`x`, `y` and
+the outputs live on the device; `obj_d` writes one host double), called with the same `ctx`
+as the host callbacks. Sizes, bounds, the starting point and the sparsity structures come
+from `problem` on the host, and the result goes to `result` on the host, as in
+`cnlp_solve`. Return 1 for a device you do not run on.
+
+`cnlp solve` calls `cnlp_solve_device` when the model has a CUDA tier (its library's
+`-cuda` build) and the solver exports it; `--device cpu` keeps a solve on the host and
+`--device cuda` requires the device. A solver without `cnlp_solve_device` is always called
+through `cnlp_solve`, so a CPU solver needs no change for 0.2.
+
 ## 2. Writing the adapter
 
 Start from [example/solver.c](../example/solver.c), a complete solver in about 120 lines
@@ -112,12 +134,11 @@ repo             = "madsuite-org/cnlplib"   # where the releases are
 nightly          = true
 rolling          = true                     # only the nightly release: `cnlp install ipopt` takes it
 platforms        = ["linux-x86_64"]
-solver_interface = "0.1"
+solver_interface = "0.2"
 backends         = ["cpu"]                  # where it evaluates the model: cpu, cuda, rocm, oneapi, metal
 ```
 
 `cnlp install <name>` then puts it in `~/.cnlplib/solvers/<name>`, and
 `cnlp solve ... --solver <name>` uses it. `cnlp list` and the registry page show each
-solver's backends. Interface 0.1 passes host callbacks, so a solver states `cpu`; a GPU
-solver needs the model's device callbacks (`P_*_d`), which the next version of the
-interface will carry.
+solver's backends: `cpu` for `cnlp_solve`, and `cuda` for a solver that exports
+`cnlp_solve_device`.

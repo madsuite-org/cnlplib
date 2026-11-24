@@ -85,6 +85,9 @@ cnlp solve @cnlptest:pn 6 no_such_option=1 $S > "$W/e.log" 2>&1 && bad "an unkno
 cnlp solve @cnlptest:nope 6 > "$W/e.log" 2>&1 && bad "an unknown model is refused" || { grep -q 'no model' "$W/e.log" && ok "an unknown model is refused" || bad "unknown model message: $(cat "$W/e.log")"; }
 grep -q '^  @cnlptest:pn' "$W/e.log" && ok "an unknown model lists the library's models" || bad "no model list: $(cat "$W/e.log")"
 cnlp solve @cnlptest:ps small $S > "$W/e.log" 2>&1 && bad "only the exact data-set file name is taken" || { grep -q 'no file `small`' "$W/e.log" && grep -q '^  case_small  (cnlptestdata/case_small.txt)' "$W/e.log" && ok "a partial data-set file name is refused, with the file names that contain it" || bad "partial name message: $(cat "$W/e.log")"; }
+cnlp solve @cnlptest:pn 6 --device cuda $S > "$W/e.log" 2>&1 && bad "--device cuda without a device tier is refused" || { grep -q 'no CUDA tier' "$W/e.log" && ok "--device cuda without a device tier is refused" || bad "device message: $(cat "$W/e.log")"; }
+cnlp solve @cnlptest:pn 6 --device tpu $S > "$W/e.log" 2>&1 && bad "an unknown device is refused" || { grep -q 'auto, cpu or cuda' "$W/e.log" && ok "an unknown device is refused" || bad "unknown device message: $(cat "$W/e.log")"; }
+cnlp solve @cnlptest:pn 6 $S > "$W/s.log" 2>&1 && grep -q '(cpu)' "$W/s.log" && ok "without a device tier the solve runs on the cpu, and says so" || bad "cpu solve: $(cat "$W/s.log")"
 cnlp solve @cnlptest:pb 5 > "$W/e.log" 2>&1 && bad "a wrong number of arguments is refused" || { grep -q 'takes 2' "$W/e.log" && ok "a wrong number of arguments is refused" || bad "argument count message: $(cat "$W/e.log")"; }
 cnlp solve @nolib:x 1 > "$W/e.log" 2>&1 && bad "a missing library is refused" || { grep -q 'cnlp install' "$W/e.log" && ok "a missing library is refused, with what to install" || bad "missing library message: $(cat "$W/e.log")"; }
 

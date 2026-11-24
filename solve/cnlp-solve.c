@@ -224,7 +224,7 @@ static int64_t instantiate(int nargs, char** args) {
 
 /* ── the problem handed to the solver ─────────────────────────────────────────── */
 
-typedef struct { int64_t id; void *obj, *grad, *cons, *js, *jac, *hs, *hess; } instance;
+typedef struct { int64_t id; void *obj, *grad, *cons, *js, *jac, *hs, *hess, *obj_d, *grad_d, *cons_d, *jac_d, *hess_d; } instance;
 typedef int64_t (*ev)(int64_t, const double*, double*);
 typedef int64_t (*st)(int64_t, int64_t*, int64_t*);
 typedef int64_t (*hv)(int64_t, const double*, const double*, double, double*);
@@ -236,6 +236,13 @@ static int64_t m_jac(void* c, const double* x, double* v) { instance* m = c; ret
 static int64_t m_hs(void* c, int64_t* r, int64_t* k) { instance* m = c; return ((st)m->hs)(m->id, r, k); }
 static int64_t m_hess(void* c, const double* x, const double* y, double w, double* v) {
     instance* m = c; return ((hv)m->hess)(m->id, x, y, w, v);
+}
+static int64_t m_obj_d(void* c, const double* x, double* f) { instance* m = c; return ((ev)m->obj_d)(m->id, x, f); }
+static int64_t m_grad_d(void* c, const double* x, double* g) { instance* m = c; return ((ev)m->grad_d)(m->id, x, g); }
+static int64_t m_cons_d(void* c, const double* x, double* v) { instance* m = c; return ((ev)m->cons_d)(m->id, x, v); }
+static int64_t m_jac_d(void* c, const double* x, double* v) { instance* m = c; return ((ev)m->jac_d)(m->id, x, v); }
+static int64_t m_hess_d(void* c, const double* x, const double* y, double w, double* v) {
+    instance* m = c; return ((hv)m->hess_d)(m->id, x, y, w, v);
 }
 
 /* ── cnlp-solution HDF5 (formats/solution.md) ─────────────────────────────────── */
@@ -322,23 +329,25 @@ static void list_models(const char* spec, int64_t (*nm)(void), int64_t (*mn)(int
 }
 
 static void usage(void) {
-    puts("usage: cnlp solve LIB[:MODEL] [INSTANCE...] [-s START] [-o OUTPUT]... [--solver NAME] [key=value...]\n"
+    puts("usage: cnlp solve LIB[:MODEL] [INSTANCE...] [-s START] [-o OUTPUT]... [--solver NAME] [--device D] [key=value...]\n"
          "  LIB      @name (installed) or a path      MODEL   left out when the library has one\n"
          "  INSTANCE an integer, a file (path, reader:path, or a data-set file name), or builder values\n"
          "  START    reader:path or a cnlp-solution file\n"
          "  OUTPUT   writer:path, or a path (the model's default writer, else cnlp-solution HDF5)\n"
-         "  --solver ipopt (default) or a path to a cnlp solver library; key=value options go to it");
+         "  --solver ipopt (default) or a path to a cnlp solver library; key=value options go to it\n"
+         "  --device auto (default: the GPU when the model and the solver both run there), cpu or cuda");
 }
 
 int main(int argc, char** argv) {
     if (argc < 2 || !strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) { usage(); return argc < 2; }
-    const char *libspec = NULL, *start = NULL, *solver = "ipopt";
+    const char *libspec = NULL, *start = NULL, *solver = "ipopt", *device = "auto";
     char *pos[64], *outs[16], *keys[128], *vals[128]; int npos = 0, nout = 0, nopt = 0;
     for (int i = 1; i < argc; i++) {
         char* a = argv[i];
         if (!strcmp(a, "-s") || !strcmp(a, "--start")) { if (++i == argc) die("%s needs a value", a); start = argv[i]; }
         else if (!strcmp(a, "-o") || !strcmp(a, "--output")) { if (++i == argc) die("%s needs a value", a); if (nout < 16) outs[nout++] = argv[i]; }
         else if (!strcmp(a, "--solver")) { if (++i == argc) die("--solver needs a value"); solver = argv[i]; }
+        else if (!strcmp(a, "--device")) { if (++i == argc) die("--device needs a value"); device = argv[i]; }
         else if (a[0] == '-' && a[1]) die("unknown option %s (see: cnlp solve --help)", a);
         else if (!libspec) libspec = a;
         else if (strchr(a, '=') && a[0] != '=') { char* e = strchr(a, '='); *e = 0; keys[nopt] = a; vals[nopt++] = e + 1; }
@@ -372,7 +381,7 @@ int main(int argc, char** argv) {
     int64_t id = instantiate(npos, pos);
     if (id <= 0) die("`%s` could not be instantiated from the given arguments", PRE);
     instance M = { id, need("obj"), need("grad"), need("cons"), need("jac_structure"), need("jac"),
-                need("hess_structure"), need("hess") };
+                need("hess_structure"), need("hess"), NULL, NULL, NULL, NULL, NULL };
     int64_t n = ((int64_t (*)(int64_t))need("nvar"))(id), m = ((int64_t (*)(int64_t))need("ncon"))(id);
     int64_t nj = ((int64_t (*)(int64_t))need("nnzj"))(id), nh = ((int64_t (*)(int64_t))need("nnzh"))(id);
     int64_t (*mini)(int64_t) = sym("minimize");
@@ -398,14 +407,36 @@ int main(int argc, char** argv) {
     int64_t (*solve)(const cnlp_problem*, int64_t, const char* const*, const char* const*, cnlp_result*) = dlsym(sh, "cnlp_solve");
     char sname[64]; int64_t (*sn)(uint8_t*, int64_t) = dlsym(sh, "cnlp_solver_name");
     int64_t L = sn ? sn((uint8_t*)sname, sizeof sname - 1) : 0; sname[L > 0 ? L : 0] = 0;
+
+    /* the device: the model's device tier with a solver that runs on it. `auto` takes it
+     * when both have it (CUDA); `cuda` requires it; `cpu` never takes it. */
+    if (strcmp(device, "auto") && strcmp(device, "cpu") && strcmp(device, "cuda"))
+        die("--device is auto, cpu or cuda, not `%s`", device);
+    int64_t (*solve_d)(const cnlp_problem*, const cnlp_device_problem*, int64_t, const char* const*,
+                       const char* const*, cnlp_result*) = dlsym(sh, "cnlp_solve_device");
+    int64_t (*dev)(int64_t) = sym("device");
+    int64_t space = dev ? dev(id) : 0;
+    int on_device = 0;
+    if (strcmp(device, "cpu")) {
+        on_device = solve_d && space == CNLP_DEVICE_CUDA;
+        if (!on_device && !strcmp(device, "cuda"))
+            die("--device cuda: %s", space != CNLP_DEVICE_CUDA ? "the model has no CUDA tier (install the library's -cuda build)"
+                                                               : "the solver does not run on a device");
+    }
+    cnlp_device_problem D = { CNLP_DEVICE_CUDA, m_obj_d, m_grad_d, m_cons_d, m_jac_d, m_hess_d };
+    if (on_device) {
+        M.obj_d = need("obj_d"); M.grad_d = need("grad_d"); M.cons_d = need("cons_d");
+        M.jac_d = need("jac_d"); M.hess_d = need("hess_d");
+    }
     struct timespec t0, t1; clock_gettime(CLOCK_MONOTONIC, &t0);
-    int64_t rc = solve(&P, nopt, (const char* const*)keys, (const char* const*)vals, &R);
+    int64_t rc = on_device ? solve_d(&P, &D, nopt, (const char* const*)keys, (const char* const*)vals, &R)
+                           : solve(&P, nopt, (const char* const*)keys, (const char* const*)vals, &R);
     clock_gettime(CLOCK_MONOTONIC, &t1);
     if (rc == 1) die("%s", R.solver_status);
     if (rc) die("the solver failed: %s", R.solver_status);
     double secs = (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec);
-    printf("%s:%s  nvar %lld  ncon %lld\n%s  objective %.15g  iterations %lld  %.3f s  (%s)\n", spec, PRE,
-           (long long)n, (long long)m, STATUS[R.status >= 0 && R.status <= 6 ? R.status : 6], R.objective,
+    printf("%s:%s  nvar %lld  ncon %lld  (%s)\n%s  objective %.15g  iterations %lld  %.3f s  (%s)\n", spec, PRE,
+           (long long)n, (long long)m, on_device ? "cuda" : "cpu", STATUS[R.status >= 0 && R.status <= 6 ? R.status : 6], R.objective,
            (long long)R.iterations, secs, R.solver_status);
 
     for (int k = 0; k < nout; k++) {
