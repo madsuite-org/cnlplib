@@ -27,7 +27,13 @@ for B in "$@"; do
     # the list first: the loop moves files out of the tree find would still be walking
     L=$(mktemp); (cd "$B" && find . \( -type f -o -type l \) ! -name MODELS ! -path './share/*') > "$L"
     while read -r f; do
-        if [ -e "$OUT/$f" ] || [ -L "$OUT/$f" ]; then
+        if [ -L "$B/$f" ] && [ -L "$OUT/$f" ] && [ "$(readlink "$B/$f")" != "$(readlink "$OUT/$f")" ]; then
+            # a versioned soname link (libstdc++.so.6) that chunks built on different
+            # runners point at different versions: keep the newest, which every chunk loads
+            # with; the versioned files themselves differ in name and are all kept
+            n=$(printf '%s\n%s\n' "$(readlink "$B/$f")" "$(readlink "$OUT/$f")" | sort -V | tail -1)
+            [ "$n" = "$(readlink "$OUT/$f")" ] || { rm "$OUT/$f"; mv "$B/$f" "$OUT/$f"; }
+        elif [ -e "$OUT/$f" ] || [ -L "$OUT/$f" ]; then
             cmp -s "$B/$f" "$OUT/$f" || { echo "$f differs between chunks"; exit 1; }
         else
             mkdir -p "$OUT/$(dirname "$f")"
