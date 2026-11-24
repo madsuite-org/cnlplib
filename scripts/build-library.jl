@@ -20,10 +20,7 @@ Pkg.develop(Pkg.PackageSpec(path = abspath(pkgdir_)))   # the checkout as it is,
 # 0.4 writes cnlp ABI 0.2 and has the device tier; never fall back to an older one
 specs = [isempty(rev) ? Pkg.PackageSpec(name = "ExaModelsCompiler", version = "0.4") :
              Pkg.PackageSpec(url = "https://github.com/madsuite-org/ExaModels.jl",
-                             subdir = "ExaModelsCompiler", rev = rev),
-         # TimerOutputs 1 loads PrettyTables 3, which loads REPL, which `juliac --trim`
-         # cannot compile; TimerOutputs 0.5 keeps it out of the image.
-         Pkg.PackageSpec(name = "TimerOutputs", version = "0.5.29")]
+                             subdir = "ExaModelsCompiler", rev = rev)]
 device === :cuda && append!(specs, [Pkg.PackageSpec(name = "CUDACore"), Pkg.PackageSpec(name = "GPUCompiler")])
 Pkg.add(specs)
 Pkg.status()

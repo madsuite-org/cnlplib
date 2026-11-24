@@ -26,7 +26,10 @@ on:
         default: cuda
         type: string
       julia-version:
-        default: "1.12.7"
+        # 1.13 or newer: on 1.11 and 1.12 PrettyTables 3 (through NLPModels and
+        # TimerOutputs) loads REPL, and with Pkg also loaded (LazyArtifacts) Pkg's REPL
+        # extension is in the image, which `juliac --trim` refuses.
+        default: "1.13.4"
         type: string
       runs-on:
         description: Runner labels, as JSON
