@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+# One deployment at a time: publish runs of merges minutes apart raced each other, and
+# deploy-pages then failed to find its artifact. A run in progress finishes; a newer one waits.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   validate:
     runs-on: ubuntu-latest
