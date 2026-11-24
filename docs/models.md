@@ -99,7 +99,13 @@ jobs:
 ```
 
 It calls `ExaModelsCompiler.compile_all(YourPackage; ...)`, so the package implements
-`compile_all` for itself (an extension on ExaModelsCompiler). Version tags come from
+`compile_all` for itself (an extension on ExaModelsCompiler). A package with many models can
+build them in parallel with `chunks: N`: N jobs each compile one part
+(`compile_all(...; chunk = (k, N))`, which the package's method accepts), and a last job
+joins them into one bundle whose `lib<name>.so` lists the models and resolves each model's
+symbols into its part (`scripts/assemble-chunks.sh`). The archive installs and loads as one
+library; each part keeps its own Julia runtime, started when one of its models is first
+used. Version tags come from
 TagBot; give TagBot an SSH key (`ssh: ${{ secrets.DOCUMENTER_KEY }}`), since a tag pushed
 with the default token starts no workflow. Other producers publish the same archives with
 their own workflow.
