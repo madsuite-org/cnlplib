@@ -67,7 +67,7 @@ close "$(h5 "$O/pn.h5" objective)" 0.5 && [ "$(h5 "$O/pn.h5" status)" = solved ]
 cnlp solve @cnlptest:pb 5 3.0 $S -o "$O/pb.h5" > "$W/s.log" 2>&1 && ok "builder values (n t)" || bad "builder values: $(cat "$W/s.log")"
 close "$(h5 "$O/pb.h5" objective)" 12.5 && close "$(h5 "$O/pb.h5" multipliers | tr -d '[]')" 5.0 && ok "  objective 12.5, y = 5" || bad "  pb objective or y"
 # a string instance: a file in an installed data set, found by name; the default writer
-cnlp solve @cnlptest:ps small $S -o "$O/ps.txt" > "$W/s.log" 2>&1 && ok "a data-set file by name (P_new_str)" || bad "a data-set file by name: $(cat "$W/s.log")"
+cnlp solve @cnlptest:ps case_small $S -o "$O/ps.txt" > "$W/s.log" 2>&1 && ok "a data-set file by name (P_new_str)" || bad "a data-set file by name: $(cat "$W/s.log")"
 grep -q '^objective 4.5' "$O/ps.txt" && ok "  the model's default writer wrote it (objective 4.5)" || bad "  default writer output"
 # reader:path, and cnlp: forcing the standard format over the default writer
 cnlp solve @cnlptest:ps "txt:$CNLPLIB_HOME/data/cnlptestdata/case_small.txt" $S -o "cnlp:$O/ps.h5" -o "txt:$O/ps2.txt" > "$W/s.log" 2>&1 \
@@ -75,7 +75,7 @@ cnlp solve @cnlptest:ps "txt:$CNLPLIB_HOME/data/cnlptestdata/case_small.txt" $S 
 close "$(h5 "$O/ps.h5" objective)" 4.5 && grep -q '^objective 4.5' "$O/ps2.txt" && ok "  cnlp:path is HDF5, writer:path the model's format" || bad "  forced formats"
 # starts: a start reader, and a solution file
 printf '0.5\n0.5\n2\n2\n2\n' > "$W/x.txt"
-cnlp solve @cnlptest:ps small -s "xstart:$W/x.txt" $S -o "cnlp:$O/w.h5" > "$W/s.log" 2>&1 && ok "a start reader (-s reader:path)" || bad "a start reader: $(cat "$W/s.log")"
+cnlp solve @cnlptest:ps case_small -s "xstart:$W/x.txt" $S -o "cnlp:$O/w.h5" > "$W/s.log" 2>&1 && ok "a start reader (-s reader:path)" || bad "a start reader: $(cat "$W/s.log")"
 [ "$(h5 "$O/w.h5" iterations)" -le 1 ] && ok "  started at the solution: $(h5 "$O/w.h5" iterations) iterations" || bad "  start reader iterations"
 cnlp solve @cnlptest:pn 6 -s "$O/pn.h5" $S -o "$O/pn2.h5" > "$W/s.log" 2>&1 && ok "a solution file as the start (-s file.h5)" || bad "a solution start: $(cat "$W/s.log")"
 # a solver by path, and options
@@ -84,6 +84,7 @@ cnlp solve @cnlptest:pn 6 --solver "$CNLPLIB_HOME/solvers/ipopt/lib/libcnlp_ipop
 cnlp solve @cnlptest:pn 6 no_such_option=1 $S > "$W/e.log" 2>&1 && bad "an unknown option is refused" || { grep -q 'no_such_option' "$W/e.log" && ok "an unknown option is refused, by name" || bad "unknown option message: $(cat "$W/e.log")"; }
 cnlp solve @cnlptest:nope 6 > "$W/e.log" 2>&1 && bad "an unknown model is refused" || { grep -q 'no model' "$W/e.log" && ok "an unknown model is refused" || bad "unknown model message: $(cat "$W/e.log")"; }
 grep -q '^  @cnlptest:pn' "$W/e.log" && ok "an unknown model lists the library's models" || bad "no model list: $(cat "$W/e.log")"
+cnlp solve @cnlptest:ps small $S > "$W/e.log" 2>&1 && bad "only the exact data-set file name is taken" || { grep -q 'no file `small`' "$W/e.log" && grep -q '^  case_small  (cnlptestdata/case_small.txt)' "$W/e.log" && ok "a partial data-set file name is refused, with the file names that contain it" || bad "partial name message: $(cat "$W/e.log")"; }
 cnlp solve @cnlptest:pb 5 > "$W/e.log" 2>&1 && bad "a wrong number of arguments is refused" || { grep -q 'takes 2' "$W/e.log" && ok "a wrong number of arguments is refused" || bad "argument count message: $(cat "$W/e.log")"; }
 cnlp solve @nolib:x 1 > "$W/e.log" 2>&1 && bad "a missing library is refused" || { grep -q 'cnlp install' "$W/e.log" && ok "a missing library is refused, with what to install" || bad "missing library message: $(cat "$W/e.log")"; }
 

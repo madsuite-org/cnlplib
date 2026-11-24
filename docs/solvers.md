@@ -84,7 +84,7 @@ Then try real models: `cnlp solve @lv:wood 10000 --solver ./libcnlp_mysolver.so`
 `--solver` takes a path, so a solver works as soon as it is built:
 
 ```sh
-cnlp solve @emp:acp case118_ieee --solver ./libcnlp_mysolver.so tol=1e-8 -o sol.m
+cnlp solve @emp:acp pglib_opf_case118_ieee --solver ./libcnlp_mysolver.so tol=1e-8 -o sol.m
 ```
 
 ## 5. Packing, releasing and registering

@@ -93,6 +93,9 @@ static void resolve_lib(const char* spec, char* out) {
 
 /* ── data files: a path, or a file in an installed data set ─────────────────────── */
 
+/* A data-set file by name: the exact file name, or the name without its extension
+ * (`pglib_opf_case118_ieee` finds pglib/pglib_opf_case118_ieee.m). Nothing looser: a name
+ * that matches no file is an error, with the files whose names contain it as suggestions. */
 static int find_in(const char* dir, const char* want, char* out, int depth) {
     DIR* d = opendir(dir); if (!d) return 0;
     struct dirent* e; int found = 0;
@@ -103,19 +106,39 @@ static int find_in(const char* dir, const char* want, char* out, int depth) {
         if (isdir(p)) { if (depth < 6) found = find_in(p, want, out, depth + 1); continue; }
         char stem[NAME_MAX + 1]; snprintf(stem, sizeof stem, "%s", e->d_name);
         char* dot = strrchr(stem, '.'); if (dot) *dot = 0;
-        size_t ls = strlen(stem), lw = strlen(want);
-        if (!strcmp(e->d_name, want) || !strcmp(stem, want) ||
-            (ls > lw && stem[ls - lw - 1] == '_' && !strcmp(stem + ls - lw, want))) {
-            snprintf(out, PATH_MAX, "%s", p); found = 1;
-        }
+        if (!strcmp(e->d_name, want) || !strcmp(stem, want)) { snprintf(out, PATH_MAX, "%s", p); found = 1; }
     }
     closedir(d); return found;
 }
+/* up to *left files under dir whose names contain want, as "  stem  (relative path)" lines */
+static char SUG[10][PATH_MAX + NAME_MAX + 8];
+static void suggest_in(const char* dir, const char* root, const char* want, int* left, int depth) {
+    DIR* d = opendir(dir); if (!d) return;
+    struct dirent* e; char p[PATH_MAX];
+    while (*left > 0 && (e = readdir(d))) {
+        if (e->d_name[0] == '.') continue;
+        snprintf(p, sizeof p, "%s/%s", dir, e->d_name);
+        if (isdir(p)) { if (depth < 6) suggest_in(p, root, want, left, depth + 1); continue; }
+        if (strstr(e->d_name, want)) {
+            char stem[NAME_MAX + 1]; snprintf(stem, sizeof stem, "%s", e->d_name);
+            char* dot = strrchr(stem, '.'); if (dot) *dot = 0;
+            snprintf(SUG[10 - *left], sizeof SUG[0], "  %s  (%s)\n", stem, p + strlen(root) + 1); (*left)--;
+        }
+    }
+    closedir(d);
+}
+static int cmp_str(const void* a, const void* b) { return strcmp((const char*)a, (const char*)b); }
 static const char* resolve_file(const char* a) {
     static char p[PATH_MAX];
     if (isfile(a) || strchr(a, '/')) return a;
     char d[PATH_MAX]; snprintf(d, sizeof d, "%s/data", home_dir());
-    return find_in(d, a, p, 0) ? p : a;
+    if (find_in(d, a, p, 0)) return p;
+    int left = 10; suggest_in(d, d, a, &left, 0);
+    qsort(SUG, 10 - left, sizeof SUG[0], cmp_str);
+    fprintf(stderr, "cnlp solve: no file `%s`: not a path, and no installed data-set file of that name%s\n",
+            a, left < 10 ? "; did you mean" : "");
+    for (int k = 0; k < 10 - left; k++) fputs(SUG[k], stderr);
+    exit(1);
 }
 
 /* `name:rest` where name is one of the model's readers or writers of `kind`, else NULL */
