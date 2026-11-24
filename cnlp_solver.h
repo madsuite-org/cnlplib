@@ -1,4 +1,4 @@
-/* cnlp_solver.h: the cnlp solver interface, version 0.1.
+/* cnlp_solver.h: the cnlp solver interface, version 0.2.
  *
  * A cnlp solver is a shared library that solves one instance of a cnlp model. The caller
  * (`cnlp solve`, or any program) loads the model, instantiates it, and hands the solver a
@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define CNLP_SOLVER_VERSION 1   /* major * 1000 + minor: 0.1 */
+#define CNLP_SOLVER_VERSION 2   /* major * 1000 + minor: 0.2 */
 
 /* Solver-neutral statuses; the solver's own is in cnlp_result.solver_status. */
 enum {
@@ -54,6 +54,22 @@ typedef struct cnlp_result {
     char solver_status[128];              /* the solver's own status, NUL-terminated */
 } cnlp_result;
 
+/* Device evaluation (0.2; optional). With a problem whose model has a device tier (cnlp.h,
+ * P##_device), the caller may also hand the solver the device callbacks: the same
+ * evaluations on device pointers (x, g, c, vals, y on the device; obj_d's `f` is one host
+ * double). The structures, bounds, starting point and the result stay on the host, through
+ * cnlp_problem and cnlp_result. `device` is the memory space, as P##_device reports it. */
+enum { CNLP_DEVICE_CUDA = 1 };
+
+typedef struct cnlp_device_problem {
+    int64_t device;                       /* CNLP_DEVICE_CUDA */
+    int64_t (*obj_d)(void* ctx, const double* x, double* f);
+    int64_t (*grad_d)(void* ctx, const double* x, double* g);
+    int64_t (*cons_d)(void* ctx, const double* x, double* c);
+    int64_t (*jac_d)(void* ctx, const double* x, double* vals);
+    int64_t (*hess_d)(void* ctx, const double* x, const double* y, double obj_weight, double* vals);
+} cnlp_device_problem;
+
 /* A cnlp solver library exports these three. Options are key=value strings, passed to
  * the solver as they are (an unknown option is an error, status 1). cnlp_solve returns 0
  * when it ran (whatever result->status says), 1 for bad options, 2 for a failure. */
@@ -63,6 +79,16 @@ typedef struct cnlp_result {
     int64_t cnlp_solve(const cnlp_problem* problem, int64_t noptions,         \
                        const char* const* keys, const char* const* values,     \
                        cnlp_result* result);
+
+/* A solver that runs on a device also exports cnlp_solve_device: the problem (host
+ * callbacks for the structures; ctx is shared), its device callbacks, and the options and
+ * result of cnlp_solve. It returns 1, like an invalid option, for a device it does not
+ * support. A caller uses it only when the solver exports it. */
+#define CNLP_DECLARE_DEVICE_SOLVER                                            \
+    int64_t cnlp_solve_device(const cnlp_problem* problem,                    \
+                              const cnlp_device_problem* device,              \
+                              int64_t noptions, const char* const* keys,      \
+                              const char* const* values, cnlp_result* result);
 
 #ifdef __cplusplus
 }
