@@ -30,7 +30,7 @@ cnlp remove lv                # remove it
 cnlp path                     # the library directory
 ```
 
-`cnlp list` shows each library's and solver's release and backends (`cpu`, `cuda`, ...).
+`cnlp list` shows one row per library, solver and data set: its releases, its backends (`cpu`, `cuda`, ...), what is installed (with the device of an installed library), and its description.
 A library is published per backend; `cnlp install` takes the CUDA build when `nvidia-smi`
 lists a GPU and the host (CPU) build otherwise, and falls back to the host build when a
 release has no device build. `--device cpu|cuda` (or `CNLPLIB_DEVICE`) chooses instead.

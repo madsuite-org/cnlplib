@@ -50,6 +50,7 @@ cnlp install cnlptest ipopt > "$W/i.log" 2>&1 && ok "cnlp install cnlptest ipopt
 [ -f "$CNLPLIB_HOME/data/cnlptestdata/case_small.txt" ] && ok "a library brings the data set it needs" || bad "the data set is installed"
 [ -f "$CNLPLIB_HOME/solvers/ipopt/lib/libcnlp_ipopt.so" ] && ok "the solver is in solvers/" || bad "the solver is in solvers/"
 cnlp list | grep -q 'cpu' && ok "cnlp list shows backends" || bad "cnlp list shows backends"
+[ "$(cnlp list | grep -c '^  cnlptest ')" = 1 ] && cnlp list | grep '^  cnlptest ' | grep -q 'latest' && ok "cnlp list has one row per library, with what is installed" || bad "cnlp list rows: $(cnlp list)"
 cnlp install cnlptest 2>&1 | grep -q 'up to date' && ok "a second install is a no-op" || bad "a second install is a no-op"
 
 # ── cnlp solve ───────────────────────────────────────────────────────────────────
