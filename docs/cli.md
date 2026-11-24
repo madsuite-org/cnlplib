@@ -146,5 +146,5 @@ The same libraries work without `cnlp solve`:
 
 - Julia: [CNLPLib.jl](https://github.com/madsuite-org/CNLPLib.jl),
   `CNLPModel("@lv", :wood, 10000)`, solved with any NLPModels solver;
-- Python: [cnlpmodels](https://github.com/madsuite-org/cnlpmodels-py);
+- Python: [cnlplib](https://github.com/madsuite-org/cnlplib-py) (`import cnlplib`);
 - C: link the library and declare its symbols with `cnlp.h` (see [example/solve.c](../example/solve.c)).

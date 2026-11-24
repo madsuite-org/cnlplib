@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Render the documentation into site/ (next to the index that build_index.py writes):
-README.md as the home page, docs/ and formats/, and a registry page listing every library,
+docs/index.md as the home page, the rest of docs/ and formats/, and a registry page listing every library,
 solver and data set with its backends. Links between the rendered pages become .html links;
 links to other files of the repository (cnlp.h, the examples) point to GitHub.
 
@@ -12,7 +12,7 @@ import markdown
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SITE = os.path.join(ROOT, "site")
 REPO = "https://github.com/madsuite-org/cnlplib/blob/main"
-PAGES = ["README.md"] + [f"docs/{f}" for f in sorted(os.listdir(os.path.join(ROOT, "docs")))] \
+PAGES = [f"docs/{f}" for f in sorted(os.listdir(os.path.join(ROOT, "docs")))] \
       + [f"formats/{f}" for f in sorted(os.listdir(os.path.join(ROOT, "formats")))]
 PAGES = [p for p in PAGES if p.endswith(".md")]
 NAV = [("index.html", "Home"), ("registry.html", "Registry"), ("docs/cli.html", "The cnlp command"),
@@ -28,7 +28,7 @@ th{background:#f6f8fa}h1,h2,h3{line-height:1.25}"""
 
 
 def out_path(page):
-    return "index.html" if page == "README.md" else page[:-3] + ".html"
+    return "index.html" if page == "docs/index.md" else page[:-3] + ".html"
 
 
 def fix_links(body, page):

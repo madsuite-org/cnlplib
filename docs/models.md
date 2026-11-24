@@ -1,7 +1,7 @@
 # Publishing a model library
 
 This guide is for anyone who wants their models installable with `cnlp install` and usable
-from `cnlp solve`, Julia (CNLPLib), Python (cnlpmodels) and C. It covers the library, its
+from `cnlp solve`, Julia (CNLPLib), Python (cnlplib) and C. It covers the library, its
 checks, its release, and its registry entry.
 
 ## 1. The library
