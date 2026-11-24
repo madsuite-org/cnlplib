@@ -69,21 +69,27 @@ release's asset has a stable URL. Its single top-level directory is the bundle:
   LICENSE                 the models' license
   THIRD_PARTY_NOTICES     licenses of everything else in the bundle
   VERSION                 name, version, cnlp_abi, platform, device (key = value lines)
-  ARTIFACTS               optional: shared artifacts it needs, `NAME-HASH TARGET` per line
+  ARTIFACTS               optional: shared artifacts it needs, `ARTIFACT TARGET` per line
 ```
 
-A library can share files with other libraries through **artifacts**: archives named by a
-hash of their content, published in the same release as `NAME-HASH.artifact.tar.gz`
-(holding `NAME-HASH/`) and listed in the library's `ARTIFACTS` file as `NAME-HASH TARGET`
-lines. `cnlp install` fetches each once into `~/.cnlplib/artifacts/NAME-HASH/`, checks it
-against the release's `SHA256SUMS`, and links each of its files into the library's `TARGET`
-directory; a library installed later that names the same artifact reuses it.
-`scripts/link-artifacts.sh` does the linking for a check.
+A library can share files with other libraries through **artifacts**, listed in its
+`ARTIFACTS` file as `ARTIFACT TARGET` lines. `cnlp install` installs each once into
+`~/.cnlplib/artifacts/` and links each of its files into the library's `TARGET` directory,
+unless the library carries a file of that name; a library installed later that names the
+same artifact reuses it. `scripts/link-artifacts.sh` does the linking for a check. An
+artifact is either
 
-`scripts/package-library.sh` makes the Julia runtime such an artifact: everything in
-`lib/julia` except each runtime's privatized `libjulia` and `libjulia-internal` (the same
-files in every library built with the same Julia: OpenBLAS, libgfortran, SuiteSparse, ...)
-becomes `julia-HASH`, linked into `lib/julia`, HASH being over the files' names and bytes.
+- `julia-VERSION`: the `lib/julia` of that official Julia release, taken from a juliaup
+  install of exactly that version if there is one, else downloaded from julialang.org and
+  checked against its published SHA-256; or
+- `NAME-HASH`: an archive published in the library's own release as
+  `NAME-HASH.artifact.tar.gz` (holding `NAME-HASH/`), HASH being over its content, checked
+  against the release's `SHA256SUMS`.
+
+`scripts/package-library.sh` shares the Julia runtime as `julia-VERSION`: every file of
+`lib/julia` that is byte for byte the official Julia's is left out of the library, except
+each runtime's privatized `libjulia` and `libjulia-internal`, which stay; a file that
+differs (a newer `libstdc++` a dependency brings) stays too.
 
 If the bundle carries GPL or LGPL libraries (a bundled Julia runtime does: SuiteSparse,
 GMP, MPFR), attach their corresponding source to the same release;

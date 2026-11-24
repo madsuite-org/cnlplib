@@ -137,10 +137,8 @@ jobs:
         run: |
           cc -std=c99 -O2 -o smoke cnlplib/scripts/smoke.c -ldl -lm
           mkdir unpacked && tar -xzf "${{ inputs.name }}-${{ matrix.variant.platform }}.tar.gz" -C unpacked
-          # as installed: its shared artifacts unpacked beside it and linked in
-          mkdir artifacts
-          while read -r a t; do tar -xzf "$a.artifact.tar.gz" -C artifacts; done < "unpacked/${{ inputs.name }}/ARTIFACTS"
-          sh cnlplib/scripts/link-artifacts.sh "unpacked/${{ inputs.name }}" artifacts
+          # as installed: the official Julia runtime (setup-julia's) linked in
+          sh cnlplib/scripts/link-artifacts.sh "unpacked/${{ inputs.name }}"
           env -i PATH=/usr/bin:/bin ./smoke "unpacked/${{ inputs.name }}/lib/lib${{ inputs.name }}.so" "${{ inputs.check-size }}"
       - name: Sources of the GPL and LGPL libraries in the runtime
         # once per release: every variant carries the same runtime
@@ -153,7 +151,6 @@ jobs:
           # directory at publish, where two files of one name would overwrite each other)
           path: |
             ${{ inputs.name }}-${{ matrix.variant.platform }}.tar.gz
-            *.artifact.tar.gz
             ${{ inputs.name }}-sources-gpl.tar
 
   chunk:
@@ -247,10 +244,8 @@ jobs:
         run: |
           cc -std=c99 -O2 -o smoke cnlplib/scripts/smoke.c -ldl -lm
           mkdir unpacked && tar -xzf "${{ inputs.name }}-${{ matrix.variant.platform }}.tar.gz" -C unpacked
-          # as installed: its shared artifacts unpacked beside it and linked in
-          mkdir artifacts
-          while read -r a t; do tar -xzf "$a.artifact.tar.gz" -C artifacts; done < "unpacked/${{ inputs.name }}/ARTIFACTS"
-          sh cnlplib/scripts/link-artifacts.sh "unpacked/${{ inputs.name }}" artifacts
+          # as installed: the official Julia runtime (setup-julia's) linked in
+          sh cnlplib/scripts/link-artifacts.sh "unpacked/${{ inputs.name }}"
           env -i PATH=/usr/bin:/bin ./smoke "unpacked/${{ inputs.name }}/lib/lib${{ inputs.name }}.so" "${{ inputs.check-size }}"
       - name: Sources of the GPL and LGPL libraries in the runtime
         # once per release: every variant carries the same runtime
@@ -263,7 +258,6 @@ jobs:
           # directory at publish, where two files of one name would overwrite each other)
           path: |
             ${{ inputs.name }}-${{ matrix.variant.platform }}.tar.gz
-            *.artifact.tar.gz
             ${{ inputs.name }}-sources-gpl.tar
 
   publish:
