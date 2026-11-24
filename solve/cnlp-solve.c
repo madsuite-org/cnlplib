@@ -286,6 +286,18 @@ static void* load_solver(const char* s, char* path) {
     return h;
 }
 
+/* the library's models, one per line, with the instance arguments each takes */
+static void list_models(const char* spec, int64_t (*nm)(void), int64_t (*mn)(int64_t, uint8_t*, int64_t)) {
+    if (!nm || !mn) return;
+    fprintf(stderr, "models:\n");
+    for (int64_t k = 0; k < nm(); k++) {
+        char name[128]; int64_t L = mn(k, (uint8_t*)name, sizeof name - 1); name[L > 0 ? L : 0] = 0;
+        snprintf(PRE, sizeof PRE, "%s", name);
+        const char* at = copyout(sym("argtype"));
+        fprintf(stderr, "  %s:%s%s%s\n", spec, name, at[0] ? "  " : "", at);
+    }
+}
+
 static void usage(void) {
     puts("usage: cnlp solve LIB[:MODEL] [INSTANCE...] [-s START] [-o OUTPUT]... [--solver NAME] [key=value...]\n"
          "  LIB      @name (installed) or a path      MODEL   left out when the library has one\n"
@@ -322,11 +334,17 @@ int main(int argc, char** argv) {
     int64_t (*nm)(void) = dlsym(LIB, "cnlp_nmodels");
     int64_t (*mn)(int64_t, uint8_t*, int64_t) = dlsym(LIB, "cnlp_model_name");
     if (!model[0]) {
-        if (!nm || !mn || nm() != 1) die("%s has several models; give one as LIB:MODEL", spec);
+        if (!nm || !mn || nm() != 1) {
+            fprintf(stderr, "cnlp solve: %s has several models; give one as LIB:MODEL\n", spec);
+            list_models(spec, nm, mn); exit(1);
+        }
         int64_t L = mn(0, (uint8_t*)model, sizeof model - 1); model[L > 0 ? L : 0] = 0;
     }
     snprintf(PRE, sizeof PRE, "%s", model);
-    if (!sym("nvar")) die("%s has no model `%s`", spec, model);
+    if (!sym("nvar")) {
+        fprintf(stderr, "cnlp solve: %s has no model `%s`\n", spec, model);
+        list_models(spec, nm, mn); exit(1);
+    }
 
     int64_t id = instantiate(npos, pos);
     if (id <= 0) die("`%s` could not be instantiated from the given arguments", PRE);
