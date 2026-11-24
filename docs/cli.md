@@ -53,7 +53,17 @@ cnlp solve LIB[:MODEL] [INSTANCE...] [-s START] [-o OUTPUT]... [--solver NAME] [
 **`LIB[:MODEL]`** names the model. `@name` is an installed library (looked up on
 `CNLPLIB_PATH`, then in `~/.cnlplib/lib`); anything else is a path, to the library file or
 its bundle directory. `:MODEL` picks one of the library's models and may be left out when it
-has one.
+has one. `cnlp solve @name` on a library with several models, or with a model it does not
+have, lists its models and the instance arguments each takes:
+
+```
+$ cnlp solve @lv
+cnlp solve: @lv has several models; give one as LIB:MODEL
+models:
+  @lv:Chained_HS46  int|size
+  ...
+  @lv:wood  int|size
+```
 
 ```sh
 cnlp solve @lv:wood 10000
