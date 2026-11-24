@@ -277,8 +277,13 @@ cmd_up() {
         [ -d "$dir" ] || continue
         for d in "$dir"/*/; do
             [ -d "$d" ] || continue
-            # reinstall what was asked for: NAME, NAME@nightly, or a pinned NAME@1.2.3
-            r="$(cut -d' ' -f3 "$d/.cnlplib-version" 2>/dev/null)"
+            # reinstall what was asked for: NAME, NAME@nightly, or a pinned NAME@1.2.3; an
+            # entry installed by hand (no release record) is not cnlp's to update
+            if [ ! -f "$d/.cnlplib-version" ]; then
+                echo "skipping $(basename "$d"): installed by hand, not from the registry"
+                continue
+            fi
+            r="$(cut -d' ' -f3 "$d/.cnlplib-version")"
             names="$names ${r:-$(basename "$d")}"
         done
     done
