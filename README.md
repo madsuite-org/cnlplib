@@ -16,9 +16,9 @@ cnlp solve @lv:wood 10000 -o sol.h5                    # solve one of its models
 ```
 
 Documentation: **[cnlplib.madsuite.org](https://cnlplib.madsuite.org)**: the ABI, the
-[registry](https://cnlplib.madsuite.org/registry.html), the
-[`cnlp` command](https://cnlplib.madsuite.org/docs/cli.html), and how to
-[publish a model library](https://cnlplib.madsuite.org/docs/models.html) or
-[add a solver](https://cnlplib.madsuite.org/docs/solvers.html).
+[registry](https://cnlplib.madsuite.org/registry/), the
+[`cnlp` command](https://cnlplib.madsuite.org/cli/), and how to
+[publish a model library](https://cnlplib.madsuite.org/models/) or
+[add a solver](https://cnlplib.madsuite.org/solvers/).
 
 MIT license. Each library in the registry carries its own license, recorded in its entry.
