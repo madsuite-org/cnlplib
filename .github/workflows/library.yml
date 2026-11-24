@@ -99,6 +99,10 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
+      # Self-hosted runners keep the workspace between runs: start empty, or a file an
+      # earlier run left (an older build's archive) is packed and published with this one.
+      - name: Empty the workspace
+        run: find . -mindepth 1 -delete
       - uses: actions/checkout@v5
         with:
           path: package
@@ -135,12 +139,16 @@ jobs:
           mkdir unpacked && tar -xzf "${{ inputs.name }}-${{ matrix.variant.platform }}.tar.gz" -C unpacked
           env -i PATH=/usr/bin:/bin ./smoke "unpacked/${{ inputs.name }}/lib/lib${{ inputs.name }}.so" "${{ inputs.check-size }}"
       - name: Sources of the GPL and LGPL libraries in the runtime
+        # once per release: every variant carries the same runtime
+        if: matrix.variant.name == 'cpu'
         run: sh cnlplib/scripts/gpl-sources.sh "$(sed -n 's/^julia = //p' unpacked/${{ inputs.name }}/VERSION)" . "${{ inputs.name }}"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.name }}-library-${{ matrix.variant.name }}
+          # this variant's archive by its exact name (each variant's artifact lands in one
+          # directory at publish, where two files of one name would overwrite each other)
           path: |
-            ${{ inputs.name }}-*.tar.gz
+            ${{ inputs.name }}-${{ matrix.variant.platform }}.tar.gz
             ${{ inputs.name }}-sources-gpl.tar
 
   chunk:
@@ -153,6 +161,10 @@ jobs:
         chunk: ${{ fromJSON(needs.plan.outputs.chunks) }}
         variant: ${{ fromJSON(needs.plan.outputs.variants) }}
     steps:
+      # Self-hosted runners keep the workspace between runs: start empty, or a file an
+      # earlier run left (an older build's archive) is packed and published with this one.
+      - name: Empty the workspace
+        run: find . -mindepth 1 -delete
       - uses: actions/checkout@v5
         with:
           path: package
@@ -184,6 +196,10 @@ jobs:
       matrix:
         variant: ${{ fromJSON(needs.plan.outputs.variants) }}
     steps:
+      # Self-hosted runners keep the workspace between runs: start empty, or a file an
+      # earlier run left (an older build's archive) is packed and published with this one.
+      - name: Empty the workspace
+        run: find . -mindepth 1 -delete
       - uses: actions/checkout@v5
         with:
           path: package
@@ -226,12 +242,16 @@ jobs:
           mkdir unpacked && tar -xzf "${{ inputs.name }}-${{ matrix.variant.platform }}.tar.gz" -C unpacked
           env -i PATH=/usr/bin:/bin ./smoke "unpacked/${{ inputs.name }}/lib/lib${{ inputs.name }}.so" "${{ inputs.check-size }}"
       - name: Sources of the GPL and LGPL libraries in the runtime
+        # once per release: every variant carries the same runtime
+        if: matrix.variant.name == 'cpu'
         run: sh cnlplib/scripts/gpl-sources.sh "$(sed -n 's/^julia = //p' unpacked/${{ inputs.name }}/VERSION)" . "${{ inputs.name }}"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.name }}-library-${{ matrix.variant.name }}
+          # this variant's archive by its exact name (each variant's artifact lands in one
+          # directory at publish, where two files of one name would overwrite each other)
           path: |
-            ${{ inputs.name }}-*.tar.gz
+            ${{ inputs.name }}-${{ matrix.variant.platform }}.tar.gz
             ${{ inputs.name }}-sources-gpl.tar
 
   publish:
