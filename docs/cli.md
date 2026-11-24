@@ -41,7 +41,7 @@ is complete.
 | Installed | Where |
 |---|---|
 | model libraries | `~/.cnlplib/lib/<name>/` |
-| shared artifacts, such as the Julia runtime (installed once, linked into the libraries that use them) | `~/.cnlplib/artifacts/<name>-<hash>/` |
+| shared artifacts, such as the official Julia runtime (installed once, linked into the libraries that use them) | `~/.cnlplib/artifacts/` |
 | solvers | `~/.cnlplib/solvers/<name>/` |
 | data sets | `~/.cnlplib/data/<name>/` |
 

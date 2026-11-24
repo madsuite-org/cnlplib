@@ -105,6 +105,51 @@ cmd_list() {
     rm -f "$INDEX"
 }
 
+# NAME-HASH.artifact.tar.gz from a release directory URL, checked against its SHA256SUMS
+install_artifact() {
+    _a="$1"; _ab="$2"
+    _aw="$(curl -fsSL "$_ab/SHA256SUMS" 2>/dev/null | awk -v f="$_a.artifact.tar.gz" '$2 == f || $2 == "*" f { print $1 }')"
+    [ -n "$_aw" ] || die "no checksum for $_a.artifact.tar.gz in $_ab/SHA256SUMS"
+    echo "Installing the shared artifact $_a"
+    mkdir -p "$ARTDIR"; _as="$(mktemp -d "$ARTDIR/.stage-$_a.XXXXXX")"
+    curl -fSL --progress-bar "$_ab/$_a.artifact.tar.gz" -o "$_as/a.tar.gz" || { rm -rf "$_as"; die "download failed: $_ab/$_a.artifact.tar.gz"; }
+    [ "$(sha256 "$_as/a.tar.gz")" = "$_aw" ] || { rm -rf "$_as"; die "checksum mismatch for $_a"; }
+    tar -xzf "$_as/a.tar.gz" -C "$_as"
+    [ -d "$_as/$_a" ] || { rm -rf "$_as"; die "$_a.artifact.tar.gz has no top-level $_a/"; }
+    mv "$_as/$_a" "$ARTDIR/$_a" 2>/dev/null || [ -d "$ARTDIR/$_a" ] || die "could not install $_a"
+    rm -rf "$_as"
+}
+
+# The lib/julia of the official Julia VERSION into DEST: from a juliaup install of exactly
+# that version if there is one, else from julialang.org's release, checked against its
+# published SHA-256.
+install_julia() {
+    _jv="$1"; _jd="$2"
+    for _jdir in "${JULIAUP_DEPOT_PATH:-$HOME/.julia}"/juliaup/julia-"$_jv"+*; do
+        if [ -f "$_jdir/lib/libjulia.so.$_jv" ] && [ -d "$_jdir/lib/julia" ]; then
+            # copied, not linked: removing that Julia with juliaup must not break the libraries
+            mkdir -p "$ARTDIR"; _js="$(mktemp -d "$ARTDIR/.stage-julia-$_jv.XXXXXX")"
+            cp -a "$_jdir/lib/julia" "$_js/julia" && mv "$_js/julia" "$_jd" 2>/dev/null || [ -d "$_jd" ] || die "could not copy Julia $_jv's runtime from $_jdir"
+            rm -rf "$_js"; echo "Installed the Julia $_jv runtime from $_jdir"; return
+        fi
+    done
+    case "$PLAT" in
+        linux-x86_64) _jf="julia-$_jv-linux-x86_64.tar.gz"; _jsub="linux/x64" ;;
+        linux-aarch64) _jf="julia-$_jv-linux-aarch64.tar.gz"; _jsub="linux/aarch64" ;;
+        *) die "no official Julia download known for $PLAT" ;;
+    esac
+    _jmm="${_jv%.*}"; _ju="https://julialang-s3.julialang.org/bin/$_jsub/$_jmm/$_jf"
+    _jw="$(curl -fsSL "https://julialang-s3.julialang.org/bin/checksums/julia-$_jv.sha256" 2>/dev/null | awk -v f="$_jf" '$2 == f { print $1 }')"
+    [ -n "$_jw" ] || die "no published checksum for $_jf"
+    echo "Installing the Julia $_jv runtime from $_ju"
+    mkdir -p "$ARTDIR"; _js="$(mktemp -d "$ARTDIR/.stage-julia-$_jv.XXXXXX")"
+    curl -fSL --progress-bar "$_ju" -o "$_js/j.tar.gz" || { rm -rf "$_js"; die "download failed: $_ju"; }
+    [ "$(sha256 "$_js/j.tar.gz")" = "$_jw" ] || { rm -rf "$_js"; die "checksum mismatch for $_jf"; }
+    tar -xzf "$_js/j.tar.gz" -C "$_js" "julia-$_jv/lib/julia"
+    mv "$_js/julia-$_jv/lib/julia" "$_jd" 2>/dev/null || [ -d "$_jd" ] || die "could not install Julia $_jv's runtime"
+    rm -rf "$_js"
+}
+
 install_one() {
     req="$1"; n="${req%%@*}"; sel=""
     case "$req" in *@*) sel="${req#*@}" ;; esac
@@ -163,28 +208,23 @@ install_one() {
         lib) ls "$src/lib/lib$n".* >/dev/null 2>&1 || die "the asset for $req has no lib/lib$n.<ext>" ;;
         solver) ls "$src/lib/libcnlp_$n".* >/dev/null 2>&1 || die "the asset for $req has no lib/libcnlp_$n.<ext>" ;;
     esac
-    # shared artifacts (ARTIFACTS: `NAME-HASH TARGET` lines): each fetched once, from the same
-    # release, into $ARTDIR/NAME-HASH, and its files linked into the library's TARGET
+    # shared artifacts (ARTIFACTS: `ARTIFACT TARGET` lines), each installed once into
+    # $ARTDIR and its files linked into the library's TARGET (a file the library carries wins)
     if [ -f "$src/ARTIFACTS" ]; then
         while read -r a t; do
             [ -n "$a" ] || continue
-            printf '%s' "$a" | grep -Eq '^[a-z0-9_]+-[0-9a-f]{16,64}$' || die "the asset for $req names an invalid artifact '$a'"
             case "/$t/" in */../*|//*) die "the asset for $req links $a into '$t', outside the library" ;; esac
-            if [ ! -d "$ARTDIR/$a" ]; then
-                aurl="${url%/*}/$a.artifact.tar.gz"
-                awant="$(curl -fsSL "${url%/*}/SHA256SUMS" 2>/dev/null | awk -v f="$a.artifact.tar.gz" '$2 == f || $2 == "*" f { print $1 }')"
-                [ -n "$awant" ] || die "no checksum for $a.artifact.tar.gz in ${url%/*}/SHA256SUMS"
-                echo "Installing the shared artifact $a"
-                curl -fSL --progress-bar "$aurl" -o "$stage/artifact.tar.gz" || die "download failed: $aurl"
-                [ "$(sha256 "$stage/artifact.tar.gz")" = "$awant" ] || die "checksum mismatch for $a"
-                mkdir -p "$ARTDIR"; astage="$(mktemp -d "$ARTDIR/.stage-$a.XXXXXX")"
-                tar -xzf "$stage/artifact.tar.gz" -C "$astage"
-                [ -d "$astage/$a" ] || { rm -rf "$astage"; die "$a.artifact.tar.gz has no top-level $a/"; }
-                mv "$astage/$a" "$ARTDIR/$a" 2>/dev/null || [ -d "$ARTDIR/$a" ] || die "could not install $a"
-                rm -rf "$astage"
+            if printf '%s' "$a" | grep -Eq '^julia-[0-9]+\.[0-9]+\.[0-9]+$'; then
+                ad="$ARTDIR/$a-$PLAT"; [ -d "$ad" ] || install_julia "${a#julia-}" "$ad"
+            elif printf '%s' "$a" | grep -Eq '^[a-z0-9_]+-[0-9a-f]{16,64}$'; then
+                ad="$ARTDIR/$a"; [ -d "$ad" ] || install_artifact "$a" "${url%/*}"
+            else
+                die "the asset for $req names an invalid artifact '$a'"
             fi
             mkdir -p "$src/$t"
-            for f in $(ls -A "$ARTDIR/$a"); do ln -sfn "$ARTDIR/$a/$f" "$src/$t/$f"; done
+            for f in $(ls -A "$ad"); do
+                [ -e "$src/$t/$f" ] || [ -L "$src/$t/$f" ] || ln -s "$ad/$f" "$src/$t/$f"
+            done
         done < "$src/ARTIFACTS"
     fi
     # the version the asset says it is, if it says
