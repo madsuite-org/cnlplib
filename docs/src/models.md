@@ -29,9 +29,11 @@ header is the specification; read its comments. In short:
   accordingly.
 - **Optional tiers** (each detected by one witness symbol): named blocks of variables,
   constraints and parameters; the objective sense (`P_minimize`, export it for a
-  maximization); solution writers and readers of the model's own file formats; device
-  (GPU) evaluation; binary32 and other number formats. Add those you can answer honestly.
-- **Multiplier signs** in writers and start readers follow
+  maximization); solution writers and readers of the model's own file formats; reports
+  (`P_report_instance`, `P_report_solution`: text about an instance and a solution, which
+  `cnlp solve` prints before and after the solve); device (GPU) evaluation; binary32 and
+  other number formats. Add those you can answer honestly.
+- **Multiplier signs** in writers, reports and start readers follow
   [formats/solution.md](../../formats/solution.md):
   `s grad f + J'y - zL + zU = 0` with `s = 1` (min) or `-1` (max), `zL, zU >= 0`.
 

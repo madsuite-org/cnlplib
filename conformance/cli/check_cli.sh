@@ -69,6 +69,10 @@ cnlp solve @cnlptest:pb 5 3.0 $S -o "$O/pb.h5" > "$W/s.log" 2>&1 && ok "builder 
 close "$(h5 "$O/pb.h5" objective)" 12.5 && close "$(h5 "$O/pb.h5" multipliers | tr -d '[]')" 5.0 && ok "  objective 12.5, y = 5" || bad "  pb objective or y"
 # a string instance: a file in an installed data set, found by name; the default writer
 cnlp solve @cnlptest:ps case_small $S -o "$O/ps.txt" > "$W/s.log" 2>&1 && ok "a data-set file by name (P_new_str)" || bad "a data-set file by name: $(cat "$W/s.log")"
+grep -q '^ps instance: n = ' "$W/s.log" && grep -q '^ps solution: solved, objective' "$W/s.log" && \
+    [ "$(grep -n '^ps instance' "$W/s.log" | cut -d: -f1)" -lt "$(grep -n '^solved' "$W/s.log" | cut -d: -f1)" ] && \
+    [ "$(grep -n '^ps solution' "$W/s.log" | cut -d: -f1)" -gt "$(grep -n '^solved' "$W/s.log" | cut -d: -f1)" ] && \
+    ok "a model's reports are printed before and after the solve" || bad "reports: $(cat "$W/s.log")"
 grep -q '^objective 4.5' "$O/ps.txt" && ok "  the model's default writer wrote it (objective 4.5)" || bad "  default writer output"
 # reader:path, and cnlp: forcing the standard format over the default writer
 cnlp solve @cnlptest:ps "txt:$CNLPLIB_HOME/data/cnlptestdata/case_small.txt" $S -o "cnlp:$O/ps.h5" -o "txt:$O/ps2.txt" > "$W/s.log" 2>&1 \

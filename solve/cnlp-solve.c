@@ -316,6 +316,26 @@ static void* load_solver(const char* s, char* path) {
     return h;
 }
 
+/* a model's report (CNLP_DECLARE_REPORTS), printed when it has one; `call` copies it out */
+static void print_report(int64_t (*call)(uint8_t*, int64_t, void*), void* arg) {
+    int64_t L = call(NULL, 0, arg);
+    if (L <= 0) return;
+    uint8_t* b = malloc(L + 1);
+    int64_t n = call(b, L, arg);
+    if (n > 0) { b[n < L ? n : L] = 0; fputs((char*)b, stdout); if (b[(n < L ? n : L) - 1] != '\n') putchar('\n'); }
+    free(b);
+}
+typedef struct { int64_t id; void* f; } rep_inst;
+static int64_t call_inst(uint8_t* b, int64_t c, void* a) {
+    rep_inst* r = a; return ((int64_t (*)(int64_t, uint8_t*, int64_t))r->f)(r->id, b, c);
+}
+typedef struct { int64_t id; void* f; cnlp_result* R; const char* status; } rep_sol;
+static int64_t call_sol(uint8_t* b, int64_t c, void* a) {
+    rep_sol* r = a;
+    return ((int64_t (*)(int64_t, const double*, const double*, const double*, const double*, double, const char*, uint8_t*, int64_t))r->f)(
+        r->id, r->R->x, r->R->y, r->R->zl, r->R->zu, r->R->objective, r->status, b, c);
+}
+
 /* the library's models, one per line, with the instance arguments each takes */
 static void list_models(const char* spec, int64_t (*nm)(void), int64_t (*mn)(int64_t, uint8_t*, int64_t)) {
     if (!nm || !mn) return;
@@ -428,6 +448,8 @@ int main(int argc, char** argv) {
         M.obj_d = need("obj_d"); M.grad_d = need("grad_d"); M.cons_d = need("cons_d");
         M.jac_d = need("jac_d"); M.hess_d = need("hess_d");
     }
+    void* rep_i = sym("report_instance");
+    if (rep_i) { rep_inst a = { id, rep_i }; print_report(call_inst, &a); }
     struct timespec t0, t1; clock_gettime(CLOCK_MONOTONIC, &t0);
     int64_t rc = on_device ? solve_d(&P, &D, nopt, (const char* const*)keys, (const char* const*)vals, &R)
                            : solve(&P, nopt, (const char* const*)keys, (const char* const*)vals, &R);
@@ -438,6 +460,8 @@ int main(int argc, char** argv) {
     printf("%s:%s  nvar %lld  ncon %lld  (%s)\n%s  objective %.15g  iterations %lld  %.3f s  (%s)\n", spec, PRE,
            (long long)n, (long long)m, on_device ? "cuda" : "cpu", STATUS[R.status >= 0 && R.status <= 6 ? R.status : 6], R.objective,
            (long long)R.iterations, secs, R.solver_status);
+    void* rep_s = sym("report_solution");
+    if (rep_s) { rep_sol a = { id, rep_s, &R, STATUS[R.status >= 0 && R.status <= 6 ? R.status : 6] }; print_report(call_sol, &a); }
 
     for (int k = 0; k < nout; k++) {
         char wr[128] = ""; const char* path = outs[k]; const char* rest = split_prefix(outs[k], wr);

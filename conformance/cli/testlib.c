@@ -148,6 +148,19 @@ int64_t ps_write_txt(int64_t id, const char* path, const double* x, const double
     fprintf(f, "\n"); fclose(f); return 0;
 }
 
+int64_t ps_report_instance(int64_t id, uint8_t* b, int64_t c) {
+    if (!ok(id)) return -1;
+    char t[128]; snprintf(t, sizeof t, "ps instance: n = %lld\n", (long long)N[id - 1]);
+    return copyout(t, b, c);
+}
+int64_t ps_report_solution(int64_t id, const double* x, const double* y, const double* zl, const double* zu,
+                           double obj, const char* status, uint8_t* b, int64_t c) {
+    (void)y; (void)zl; (void)zu; if (!ok(id)) return -1;
+    double sx = 0; for (int64_t i = 0; i < N[id - 1]; i++) sx += x[i];
+    char t[256]; snprintf(t, sizeof t, "ps solution: %s, objective %.6g, sum(x) = %.6g\n", status ? status : "?", obj, sx);
+    return copyout(t, b, c);
+}
+
 /* the library level */
 int64_t cnlp_abi_version(void) { return 2; }
 int64_t cnlp_nmodels(void) { return 3; }

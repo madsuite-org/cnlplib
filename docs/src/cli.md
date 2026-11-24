@@ -95,6 +95,10 @@ cnlp solve: no file `case118`: not a path, and no installed data-set file of tha
   pglib_opf_case118_ieee__sad  (pglib/sad/pglib_opf_case118_ieee__sad.m)
 ```
 
+A model with reports prints them around the solve: what the instance is, before it, and a
+summary of the solution after it (for an optimal power flow, its constraint violations by
+group, say), as the model's library defines them.
+
 **`-s START`** warm-starts from `reader:path` (one of the model's start readers, such as a
 solved case) or from a cnlp-solution HDF5 file written by an earlier solve; the start's
 sizes must match the model.
