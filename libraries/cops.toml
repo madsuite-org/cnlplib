@@ -1,0 +1,12 @@
+name        = "cops"
+description = "COPS 3.0 test problems, COPSBenchmark.jl"
+producer    = "COPSBenchmark.jl"
+homepage    = "https://github.com/madsuite-org/COPSBenchmark.jl"
+license     = "MIT"
+maintainers = ["sshin23"]
+models      = ["bearing", "camshape", "catmix", "chain", "channel", "elec", "gasoil", "glider", "marine", "methanol", "minsurf", "pinene", "polygon", "robot", "rocket", "steering", "torsion"]
+repo        = "madsuite-org/COPSBenchmark.jl"
+nightly     = true
+platforms   = ["linux-x86_64"]
+cnlp_abi    = "0.2"
+device      = ["cuda"]
