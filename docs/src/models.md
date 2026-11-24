@@ -49,6 +49,10 @@ written with ExaModels are compiled into one with ExaModelsCompiler
   that is not the runtime's own language has nothing preloaded.
 - `scripts/check-library.jl` evaluates every model through CNLPLib and, when the library
   has the device tier and a GPU is present, compares device callbacks with host ones.
+- `scripts/check-ptx.sh BUNDLE MAX` fails if a device build's kernels are PTX of an ISA
+  newer than `MAX`: the driver compiles PTX when it loads it, and a driver older than the
+  ISA refuses it, so every device evaluation fails. The library workflow runs it on CUDA
+  builds with `max-ptx` (default 7.8, CUDA 11.8's ISA).
 - `cnlp solve path/to/libNAME.so:MODEL ARGS...` solves one with an installed solver.
 - [conformance/](../../conformance/) holds reference files for the input and solution formats.
 

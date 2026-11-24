@@ -65,6 +65,10 @@ on:
         description: The cnlplib revision whose scripts the jobs run (the one this workflow is called at)
         default: main
         type: string
+      max-ptx:
+        description: Newest PTX ISA a device build may carry (7.8 is CUDA 11.8's; a driver older than the ISA cannot load the kernels)
+        default: "7.8"
+        type: string
 
 permissions:
   contents: read
@@ -131,6 +135,9 @@ jobs:
         run: julia --startup-file=no cnlplib/scripts/build-library.jl package "${{ inputs.name }}" build ${{ matrix.variant.device }}
       - name: Check
         run: julia --startup-file=no cnlplib/scripts/check-library.jl "build/${{ inputs.name }}/lib/lib${{ inputs.name }}.so" "${{ inputs.check-size }}"
+      - name: PTX ISA of the device code
+        if: matrix.variant.device != ''
+        run: sh cnlplib/scripts/check-ptx.sh "build/${{ inputs.name }}" "${{ inputs.max-ptx }}"
       - name: Package
         run: cnlplib/scripts/package-library.sh "build/${{ inputs.name }}" "${{ inputs.name }}" "${{ steps.version.outputs.version }}" "${{ matrix.variant.platform }}" package/LICENSE "${{ matrix.variant.device }}"
       - name: Load it in a plain C process
@@ -238,6 +245,9 @@ jobs:
           sh cnlplib/scripts/assemble-chunks.sh "${{ inputs.name }}" "build/${{ inputs.name }}" build/chunks/${{ inputs.name }}_*
       - name: Check
         run: julia --startup-file=no cnlplib/scripts/check-library.jl "build/${{ inputs.name }}/lib/lib${{ inputs.name }}.so" "${{ inputs.check-size }}"
+      - name: PTX ISA of the device code
+        if: matrix.variant.device != ''
+        run: sh cnlplib/scripts/check-ptx.sh "build/${{ inputs.name }}" "${{ inputs.max-ptx }}"
       - name: Package
         run: cnlplib/scripts/package-library.sh "build/${{ inputs.name }}" "${{ inputs.name }}" "${{ steps.version.outputs.version }}" "${{ matrix.variant.platform }}" package/LICENSE "${{ matrix.variant.device }}"
       - name: Load it in a plain C process
