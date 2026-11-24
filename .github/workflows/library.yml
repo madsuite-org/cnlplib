@@ -15,6 +15,10 @@
 # (scripts/assemble-chunks.sh), so the archive installs and loads as one library. The
 # package's `compile_all` takes `chunk = (k, N)` and compiles the k-th of N parts.
 #
+# Each library is built once per backend: the host (CPU) build, published as
+# NAME-linux-x86_64.tar.gz, and, with `device: cuda`, a build with the CUDA tier as well,
+# NAME-linux-x86_64-cuda.tar.gz. `cnlp install` takes the one the machine supports.
+#
 # Every run builds and checks. A push to the default branch (or a manual run on it)
 # replaces the assets of the package's rolling `nightly` release; a `v*` tag (TagBot's, on registration) attaches
 # them to that version's release.
@@ -28,7 +32,7 @@ on:
         required: true
         type: string
       device:
-        description: '"cuda" to add the device tier (needs a GPU runner), "" for host only'
+        description: '"cuda" to build the CUDA variant too (on a GPU runner), "" for the host build only'
         default: cuda
         type: string
       julia-version:
@@ -38,8 +42,12 @@ on:
         default: "1.13.4"
         type: string
       runs-on:
-        description: Runner labels, as JSON
+        description: Runner labels for the device builds, as JSON
         default: '["self-hosted", "gpu", "cuda", "shin-compute"]'
+        type: string
+      cpu-runs-on:
+        description: Runner labels for the host builds, as JSON (no GPU needed)
+        default: '["self-hosted", "shin-compute"]'
         type: string
       examodelscompiler-rev:
         description: Take ExaModelsCompiler from this ExaModels.jl revision instead of the registry
@@ -62,9 +70,32 @@ permissions:
   contents: read
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      chunks: ${{ steps.plan.outputs.chunks }}
+      variants: ${{ steps.plan.outputs.variants }}
+    steps:
+      - id: plan
+        env:
+          DEVICE: ${{ inputs.device }}
+          GPU: ${{ inputs.runs-on }}
+          CPU: ${{ inputs.cpu-runs-on }}
+        run: |
+          echo "chunks=$(seq 0 $(( ${{ inputs.chunks }} - 1 )) | jq -sc 'map(tostring)')" >> "$GITHUB_OUTPUT"
+          # one build per backend: the host build, and the device build if asked for
+          v=$(jq -nc --arg cpu "$CPU" '[{name: "cpu", device: "", platform: "linux-x86_64", runs: $cpu}]')
+          [ -z "$DEVICE" ] || v=$(echo "$v" | jq -c --arg d "$DEVICE" --arg gpu "$GPU" \
+              '. + [{name: $d, device: $d, platform: ("linux-x86_64-" + $d), runs: $gpu}]')
+          echo "variants=$v" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: plan
     if: inputs.chunks == '1'
-    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    runs-on: ${{ fromJSON(matrix.variant.runs) }}
+    strategy:
+      matrix:
+        variant: ${{ fromJSON(needs.plan.outputs.variants) }}
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -93,41 +124,34 @@ jobs:
       - name: Build
         env:
           EXAMODELSCOMPILER_REV: ${{ inputs.examodelscompiler-rev }}
-        run: julia --startup-file=no cnlplib/scripts/build-library.jl package "${{ inputs.name }}" build ${{ inputs.device }}
+        run: julia --startup-file=no cnlplib/scripts/build-library.jl package "${{ inputs.name }}" build ${{ matrix.variant.device }}
       - name: Check
         run: julia --startup-file=no cnlplib/scripts/check-library.jl "build/${{ inputs.name }}/lib/lib${{ inputs.name }}.so" "${{ inputs.check-size }}"
       - name: Package
-        run: cnlplib/scripts/package-library.sh "build/${{ inputs.name }}" "${{ inputs.name }}" "${{ steps.version.outputs.version }}" linux-x86_64 package/LICENSE "${{ inputs.device }}"
+        run: cnlplib/scripts/package-library.sh "build/${{ inputs.name }}" "${{ inputs.name }}" "${{ steps.version.outputs.version }}" "${{ matrix.variant.platform }}" package/LICENSE "${{ matrix.variant.device }}"
       - name: Load it in a plain C process
         run: |
           cc -std=c99 -O2 -o smoke cnlplib/scripts/smoke.c -ldl -lm
-          mkdir unpacked && tar -xzf "${{ inputs.name }}-linux-x86_64.tar.gz" -C unpacked
+          mkdir unpacked && tar -xzf "${{ inputs.name }}-${{ matrix.variant.platform }}.tar.gz" -C unpacked
           env -i PATH=/usr/bin:/bin ./smoke "unpacked/${{ inputs.name }}/lib/lib${{ inputs.name }}.so" "${{ inputs.check-size }}"
       - name: Sources of the GPL and LGPL libraries in the runtime
         run: sh cnlplib/scripts/gpl-sources.sh "$(sed -n 's/^julia = //p' unpacked/${{ inputs.name }}/VERSION)" . "${{ inputs.name }}"
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.name }}-library
+          name: ${{ inputs.name }}-library-${{ matrix.variant.name }}
           path: |
             ${{ inputs.name }}-*.tar.gz
             ${{ inputs.name }}-sources-gpl.tar
 
-  plan:
-    if: inputs.chunks != '1'
-    runs-on: ubuntu-latest
-    outputs:
-      chunks: ${{ steps.plan.outputs.chunks }}
-    steps:
-      - id: plan
-        run: echo "chunks=$(seq 0 $(( ${{ inputs.chunks }} - 1 )) | jq -sc 'map(tostring)')" >> "$GITHUB_OUTPUT"
-
   chunk:
     needs: plan
-    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    if: inputs.chunks != '1'
+    runs-on: ${{ fromJSON(matrix.variant.runs) }}
     strategy:
       fail-fast: true
       matrix:
         chunk: ${{ fromJSON(needs.plan.outputs.chunks) }}
+        variant: ${{ fromJSON(needs.plan.outputs.variants) }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -144,18 +168,21 @@ jobs:
         env:
           EXAMODELSCOMPILER_REV: ${{ inputs.examodelscompiler-rev }}
           CNLP_CHUNK: ${{ matrix.chunk }}/${{ inputs.chunks }}
-        run: julia --startup-file=no cnlplib/scripts/build-library.jl package "${{ inputs.name }}" build ${{ inputs.device }}
+        run: julia --startup-file=no cnlplib/scripts/build-library.jl package "${{ inputs.name }}" build ${{ matrix.variant.device }}
       - name: Pack the chunk
         run: tar -C build -cf "chunk-${{ matrix.chunk }}.tar" "${{ inputs.name }}_${{ matrix.chunk }}"
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.name }}-chunk-${{ matrix.chunk }}
+          name: ${{ inputs.name }}-chunk-${{ matrix.variant.name }}-${{ matrix.chunk }}
           path: chunk-${{ matrix.chunk }}.tar
           retention-days: 1
 
   assemble:
-    needs: chunk
-    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    needs: [plan, chunk]
+    runs-on: ${{ fromJSON(matrix.variant.runs) }}
+    strategy:
+      matrix:
+        variant: ${{ fromJSON(needs.plan.outputs.variants) }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -181,7 +208,7 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v4
         with:
-          pattern: ${{ inputs.name }}-chunk-*
+          pattern: ${{ inputs.name }}-chunk-${{ matrix.variant.name }}-*
           path: chunks
           merge-multiple: true
       - name: Join the chunks
@@ -192,17 +219,17 @@ jobs:
       - name: Check
         run: julia --startup-file=no cnlplib/scripts/check-library.jl "build/${{ inputs.name }}/lib/lib${{ inputs.name }}.so" "${{ inputs.check-size }}"
       - name: Package
-        run: cnlplib/scripts/package-library.sh "build/${{ inputs.name }}" "${{ inputs.name }}" "${{ steps.version.outputs.version }}" linux-x86_64 package/LICENSE "${{ inputs.device }}"
+        run: cnlplib/scripts/package-library.sh "build/${{ inputs.name }}" "${{ inputs.name }}" "${{ steps.version.outputs.version }}" "${{ matrix.variant.platform }}" package/LICENSE "${{ matrix.variant.device }}"
       - name: Load it in a plain C process
         run: |
           cc -std=c99 -O2 -o smoke cnlplib/scripts/smoke.c -ldl -lm
-          mkdir unpacked && tar -xzf "${{ inputs.name }}-linux-x86_64.tar.gz" -C unpacked
+          mkdir unpacked && tar -xzf "${{ inputs.name }}-${{ matrix.variant.platform }}.tar.gz" -C unpacked
           env -i PATH=/usr/bin:/bin ./smoke "unpacked/${{ inputs.name }}/lib/lib${{ inputs.name }}.so" "${{ inputs.check-size }}"
       - name: Sources of the GPL and LGPL libraries in the runtime
         run: sh cnlplib/scripts/gpl-sources.sh "$(sed -n 's/^julia = //p' unpacked/${{ inputs.name }}/VERSION)" . "${{ inputs.name }}"
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.name }}-library
+          name: ${{ inputs.name }}-library-${{ matrix.variant.name }}
           path: |
             ${{ inputs.name }}-*.tar.gz
             ${{ inputs.name }}-sources-gpl.tar
@@ -223,8 +250,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.name }}-library
+          pattern: ${{ inputs.name }}-library-*
           path: dist
+          merge-multiple: true
       - name: Checksums
         run: cd dist && sha256sum -- *.tar.gz > SHA256SUMS && cat SHA256SUMS
       - name: Versioned release

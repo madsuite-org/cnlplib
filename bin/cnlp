@@ -3,7 +3,7 @@
 # registry, and solve the models.
 #
 #   cnlp list               available libraries for this platform, and what is installed
-#   cnlp install NAME...    install or update libraries ($CNLPLIB_HOME/lib/NAME), solvers
+#   cnlp install [--device D] NAME...  install or update libraries ($CNLPLIB_HOME/lib/NAME), solvers
 #                             ($CNLPLIB_HOME/solvers/NAME) or data sets
 #                             ($CNLPLIB_HOME/data/NAME); a library brings
 #                             the data sets it needs. NAME is the latest release,
@@ -14,7 +14,13 @@
 #   cnlp remove NAME...     remove installed libraries, solvers or data sets
 #   cnlp path               print the library directory (for CNLPLIB_PATH)
 #
-# Environment: CNLPLIB_HOME (default ~/.cnlplib), CNLPLIB_INDEX (default the published index).
+# A library is published per backend: the host (CPU) build, and a build with a device tier
+# (CUDA) as well. `install` takes the device build when this machine has that device
+# (nvidia-smi lists a GPU) and the host build otherwise; --device cpu|cuda, or
+# CNLPLIB_DEVICE, chooses instead.
+#
+# Environment: CNLPLIB_HOME (default ~/.cnlplib), CNLPLIB_INDEX (default the published index),
+# CNLPLIB_DEVICE (cpu or cuda; default: detected).
 set -eu
 
 CNLPLIB_HOME="${CNLPLIB_HOME:-$HOME/.cnlplib}"
@@ -48,9 +54,25 @@ fetch_index() {
     curl -fsSL "$CNLPLIB_INDEX" -o "$INDEX" || die "could not download the index from $CNLPLIB_INDEX"
 }
 
-# name label platform url sha256 description kind requires versioned-url backends, for this platform
-# (sha256 `-`: in the SHA256SUMS next to the asset; versioned-url has `{version}`)
-lookup() { awk -F'\t' -v n="$1" -v p="$PLAT" '$1 == n && ($3 == p || $3 == "any")' "$INDEX" | head -n 1; }
+# The devices this machine can use, best first: `cuda` when nvidia-smi lists a GPU.
+devices() {
+    case "${CNLPLIB_DEVICE:-}" in
+        "") if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L 2>/dev/null | grep -q '^GPU'; then echo cuda; fi ;;
+        cpu) ;;
+        cuda) echo cuda ;;
+        *) die "unknown device '$CNLPLIB_DEVICE' (cpu or cuda)" ;;
+    esac
+}
+
+# name label platform url sha256 description kind requires versioned-url backends
+# (sha256 `-`: in the SHA256SUMS next to the asset; versioned-url has `{version}`), every line
+# for this machine, best first: the platform with each usable device, then the host build
+lookup_all() {
+    for p in $(for d in $(devices); do echo "$PLAT-$d"; done) "$PLAT" any; do
+        awk -F'\t' -v n="$1" -v p="$p" '$1 == n && $3 == p' "$INDEX"
+    done
+}
+lookup() { lookup_all "$1" | head -n 1; }
 
 # what is installed: "<version> <sha256> <request>"
 installed() { cat "$LIBDIR/$1/.cnlplib-version" "$SOLVERDIR/$1/.cnlplib-version" "$DATADIR/$1/.cnlplib-version" 2>/dev/null | head -n 1; }
@@ -71,7 +93,7 @@ cmd_list() {
     fetch_index
     echo "Libraries for $PLAT (from $CNLPLIB_INDEX):"
     printf "  %-14s %-10s %-10s %s\n" NAME RELEASE BACKENDS DESCRIPTION
-    awk -F'\t' -v p="$PLAT" '$3 == p && $7 == "lib" { printf "  %-14s %-10s %-10s %s\n", $1, $2, $10, $6; n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
+    awk -F'\t' -v p="$PLAT" 'index($3, p) == 1 && $7 == "lib" { printf "  %-14s %-10s %-10s %s\n", $1, $2, $10, $6; n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
     echo "Solvers:"
     awk -F'\t' -v p="$PLAT" '$3 == p && $7 == "solver" { printf "  %-14s %-10s %-10s %s\n", $1, $2, $10, $6; n++ } END { if (!n) print "  (none yet)" }' "$INDEX"
     echo "Data sets:"
@@ -96,26 +118,36 @@ install_one() {
     req="$1"; n="${req%%@*}"; sel=""
     case "$req" in *@*) sel="${req#*@}" ;; esac
     case "$sel" in ""|latest) line="$(lookup "$n")" ;; nightly) line="$(lookup "$n@nightly")" ;; *) line="$(lookup "$n")" ;; esac
-    ver="$(printf '%s' "$line" | cut -f2)"; url="$(printf '%s' "$line" | cut -f4)"; want="$(printf '%s' "$line" | cut -f5)"
-    kind="$(printf '%s' "$line" | cut -f7)"; tmpl="$(printf '%s' "$line" | cut -f9)"
-    case "$sel" in
-        ""|latest|nightly) ;;
-        *)  [ -n "$tmpl" ] && [ "$tmpl" != "-" ] || die "$n has no versioned releases"
-            url="$(printf '%s' "$tmpl" | sed "s/{version}/$sel/g")"; ver="$sel"; want="-" ;;
-    esac
+    key="$n"; [ "$sel" = nightly ] && key="$n@nightly"
+    # the first build, best first, that the release actually carries (a library released before
+    # its device build was published has only the host build)
+    cands="$(mktemp "${TMPDIR:-/tmp}/cnlplib-cands.XXXXXX")"; lookup_all "$key" > "$cands"
+    want=""
+    while IFS= read -r line; do
+        ver="$(printf '%s' "$line" | cut -f2)"; url="$(printf '%s' "$line" | cut -f4)"; want="$(printf '%s' "$line" | cut -f5)"
+        kind="$(printf '%s' "$line" | cut -f7)"; tmpl="$(printf '%s' "$line" | cut -f9)"
+        build="$(printf '%s' "$line" | cut -f3)"
+        case "$sel" in
+            ""|latest|nightly) ;;
+            *)  [ -n "$tmpl" ] && [ "$tmpl" != "-" ] || { want=""; continue; }
+                url="$(printf '%s' "$tmpl" | sed "s/{version}/$sel/g")"; ver="$sel"; want="-" ;;
+        esac
+        if [ "$want" = "-" ]; then
+            # published with the asset: the SHA256SUMS of the same release
+            want="$(curl -fsSL "${url%/*}/SHA256SUMS" 2>/dev/null | awk -v f="${url##*/}" '$2 == f || $2 == "*" f { print $1 }')"
+        fi
+        [ -n "$want" ] && break
+    done < "$cands"
+    rm -f "$cands"
+    [ -n "$want" ] || die "no released build of '$req' for $PLAT (is it released? see: cnlp list)"
     dest="$LIBDIR"; [ "$kind" = data ] && dest="$DATADIR"; [ "$kind" = solver ] && dest="$SOLVERDIR"
-    if [ "$want" = "-" ]; then
-        # published with the asset: the SHA256SUMS of the same release
-        want="$(curl -fsSL "${url%/*}/SHA256SUMS" 2>/dev/null | awk -v f="${url##*/}" '$2 == f || $2 == "*" f { print $1 }')"
-        [ -n "$want" ] || die "no checksum for ${url##*/} in ${url%/*}/SHA256SUMS (is '$req' released?)"
-    fi
     cur="$(installed "$n")"
     if [ "$(printf '%s' "$cur" | cut -d' ' -f2)" = "$want" ]; then
         # same bytes: record the request, so `up` follows the channel asked for last
         f="$dest/$n/.cnlplib-version"; echo "${cur%% *} $want $req" > "$f"
         echo "$req is up to date"; return
     fi
-    echo "Installing $req"
+    echo "Installing $req ($build)"
     mkdir -p "$dest"
     stage="$(mktemp -d "$dest/.stage-$n.XXXXXX")"
     trap 'rm -rf "$stage"' EXIT INT TERM
@@ -143,7 +175,9 @@ install_one() {
 }
 
 cmd_install() {
-    [ "$#" -gt 0 ] || die "usage: cnlp install NAME..."
+    if [ "${1:-}" = --device ]; then [ "$#" -ge 2 ] || die "usage: cnlp install --device cpu|cuda NAME..."; CNLPLIB_DEVICE="$2"; shift 2; fi
+    [ "$#" -gt 0 ] || die "usage: cnlp install [--device cpu|cuda] NAME..."
+    devices > /dev/null   # an unknown CNLPLIB_DEVICE stops here, not inside a lookup
     fetch_index
     for n in "$@"; do install_one "$n"; done
     rm -f "$INDEX"
@@ -187,6 +221,6 @@ case "${1:-}" in
         d="$CNLPLIB_HOME/bin/cnlp-solve"
         [ -x "$d" ] || d="$(command -v cnlp-solve 2>/dev/null)" || die "cnlp-solve is not installed (rerun the installer)"
         exec "$d" "$@" ;;
-    ""|-h|--help|help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//' ;;
+    ""|-h|--help|help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' ;;
     *) die "unknown command '$1' (see: cnlp help)" ;;
 esac

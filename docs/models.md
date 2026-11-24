@@ -56,7 +56,10 @@ written with ExaModels are compiled into one with ExaModelsCompiler
 
 One archive per platform, named `<name>-<platform>.tar.gz`, where `<name>` is the registry
 name (lowercase, `[a-z0-9_]`) and `<platform>` is `<os>-<arch>` (`linux-x86_64`,
-`linux-aarch64`, `macos-aarch64`, `windows-x86_64`). The name carries no version, so each
+`linux-aarch64`, `macos-aarch64`, `windows-x86_64`). A library with a device tier is also
+published per backend: `<name>-<platform>.tar.gz` holds the host (CPU) build only, and
+`<name>-<platform>-<device>.tar.gz` (`-cuda`) the host build with that device tier; `cnlp
+install` takes the one the machine supports. The name carries no version, so each
 release's asset has a stable URL. Its single top-level directory is the bundle:
 
 ```
@@ -127,7 +130,7 @@ repo        = "madsuite-org/LuksanVlcekBenchmark.jl"  # where the releases are
 nightly     = true                                    # publishes a `nightly` release
 platforms   = ["linux-x86_64"]
 cnlp_abi    = "0.2"
-device      = ["cuda"]                                # optional: device tiers it exports (shown as backends)
+device      = ["cuda"]                                # optional: device builds it publishes (NAME-PLATFORM-cuda.tar.gz)
 data        = ["pglib"]                               # optional: data sets it needs
 ```
 
