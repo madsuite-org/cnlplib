@@ -107,7 +107,7 @@ sizes must match the model.
 | `-o writer:path` | one of the model's own formats (`-o matpower:sol.m`) |
 | `-o cnlp:path` | the standard HDF5 file, whatever the model's default |
 
-The standard file is described in [formats/solution.md](../formats/solution.md); its
+The standard file is described in [formats/solution.md](../../formats/solution.md); its
 multipliers follow the cnlp sign convention.
 
 **`--solver NAME`** picks an installed solver (default `ipopt`), or a solver library by path
@@ -147,4 +147,4 @@ The same libraries work without `cnlp solve`:
 - Julia: [CNLPLib.jl](https://github.com/madsuite-org/CNLPLib.jl),
   `CNLPModel("@lv", :wood, 10000)`, solved with any NLPModels solver;
 - Python: [cnlplib](https://github.com/madsuite-org/cnlplib-py) (`import cnlplib`);
-- C: link the library and declare its symbols with `cnlp.h` (see [example/solve.c](../example/solve.c)).
+- C: link the library and declare its symbols with `cnlp.h` (see [example/solve.c](../../example/solve.c)).

@@ -6,7 +6,7 @@ checks, its release, and its registry entry.
 
 ## 1. The library
 
-A cnlp library is a shared library that implements [cnlp.h](../cnlp.h) (cnlp ABI 0.2). The
+A cnlp library is a shared library that implements [cnlp.h](../../cnlp.h) (cnlp ABI 0.2). The
 header is the specification; read its comments. In short:
 
 - **Models and prefixes.** Each model exports its symbols under a prefix `P`
@@ -32,11 +32,11 @@ header is the specification; read its comments. In short:
   maximization); solution writers and readers of the model's own file formats; device
   (GPU) evaluation; binary32 and other number formats. Add those you can answer honestly.
 - **Multiplier signs** in writers and start readers follow
-  [formats/solution.md](../formats/solution.md):
+  [formats/solution.md](../../formats/solution.md):
   `s grad f + J'y - zL + zU = 0` with `s = 1` (min) or `-1` (max), `zL, zU >= 0`.
 
 You can write the library in any language that produces a C shared library.
-[example/qp.c](../example/qp.c) is a complete one in about 300 lines of C. Julia models
+[example/qp.c](../../example/qp.c) is a complete one in about 300 lines of C. Julia models
 written with ExaModels are compiled into one with ExaModelsCompiler
 (`compile_library`, or `compile_all` for a package's whole collection; see its docs).
 
@@ -50,7 +50,7 @@ written with ExaModels are compiled into one with ExaModelsCompiler
 - `scripts/check-library.jl` evaluates every model through CNLPLib and, when the library
   has the device tier and a GPU is present, compares device callbacks with host ones.
 - `cnlp solve path/to/libNAME.so:MODEL ARGS...` solves one with an installed solver.
-- [conformance/](../conformance/) holds reference files for the input and solution formats.
+- [conformance/](../../conformance/) holds reference files for the input and solution formats.
 
 ## 3. Packing it
 

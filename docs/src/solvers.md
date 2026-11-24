@@ -1,7 +1,7 @@
 # Adding a solver
 
 This guide is for anyone who wants their solver to run every cnlp model with `cnlp solve`.
-A solver implements one small interface, [cnlp_solver.h](../cnlp_solver.h); `cnlp solve`
+A solver implements one small interface, [cnlp_solver.h](../../cnlp_solver.h); `cnlp solve`
 does everything around it (finding and instantiating the model, readers, warm starts,
 writers, solution files), so the solver never sees a file or a model format.
 
@@ -79,10 +79,10 @@ through `cnlp_solve`, so a CPU solver needs no change for 0.2.
 
 ## 2. Writing the adapter
 
-Start from [example/solver.c](../example/solver.c), a complete solver in about 120 lines
+Start from [example/solver.c](../../example/solver.c), a complete solver in about 120 lines
 (Newton's method on the KKT conditions, for equality-constrained problems without bounds).
 A real adapter replaces its iteration with a call into the solver's own API, converting
-the callbacks one to one. [adapters/ipopt/cnlp_ipopt.c](../adapters/ipopt/cnlp_ipopt.c)
+the callbacks one to one. [adapters/ipopt/cnlp_ipopt.c](../../adapters/ipopt/cnlp_ipopt.c)
 does this for Ipopt's C interface in under 200 lines, including option passing, warm
 starts and the status mapping.
 
@@ -91,7 +91,7 @@ Any language that produces a C shared library works: C, C++, Rust, Fortran
 
 ## 3. Checking it
 
-[conformance/check_solver.py](../conformance/check_solver.py) solves the reference QP and
+[conformance/check_solver.py](../../conformance/check_solver.py) solves the reference QP and
 its maximization twin and checks the objective, feasibility, the known solution, and the
 multipliers in the cnlp sign convention:
 

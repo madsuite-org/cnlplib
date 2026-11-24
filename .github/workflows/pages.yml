@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+# One deployment at a time: publish runs of merges minutes apart raced each other, and
+# deploy-pages then failed to find its artifact. A run in progress finishes; a newer one waits.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -19,8 +25,14 @@ jobs:
           python-version: "3.12"
       - name: Validate entries and build the index
         run: python3 scripts/build_index.py
-      - name: Render the documentation
-        run: pip install -q markdown && python3 scripts/build_site.py
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+      - uses: julia-actions/cache@v2
+      - name: Render the documentation (Documenter)
+        run: |
+          julia --project=docs -e 'using Pkg; Pkg.instantiate()'
+          julia --project=docs docs/make.jl
       - name: Check the shell scripts
         run: |
           sh -n install.sh
@@ -41,10 +53,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+      - uses: julia-actions/cache@v2
       - name: Build the site
         run: |
           python3 scripts/build_index.py
-          pip install -q markdown && python3 scripts/build_site.py
+          julia --project=docs -e 'using Pkg; Pkg.instantiate()'
+          julia --project=docs docs/make.jl
           cp install.sh site/install
           cp install.sh site/install.sh
           cp bin/cnlp site/cnlp
