@@ -1,0 +1,13 @@
+name        = "emp"
+description = "Optimal power flow models (AC polar, AC rectangular, DC; static and multi-period), ExaModelsPower.jl"
+producer    = "ExaModelsPower.jl"
+homepage    = "https://github.com/madsuite-org/ExaModelsPower.jl"
+license     = "MIT"
+maintainers = ["sshin23"]
+models      = ["acp", "acr", "dcp", "mpacp", "mpacr", "mpdcp"]
+repo        = "madsuite-org/ExaModelsPower.jl"
+nightly     = true
+platforms   = ["linux-x86_64"]
+cnlp_abi    = "0.2"
+device      = ["cuda"]
+data        = ["pglib"]
