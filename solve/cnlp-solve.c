@@ -16,6 +16,7 @@
 #include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <setjmp.h>
 #include <hdf5.h>
 #include <limits.h>
 #include <math.h>
@@ -28,10 +29,17 @@
 #include <time.h>
 #include "cnlp_solver.h"
 
-static void die(const char* fmt, ...) {
+/* In a batch (--batch), an error ends that instance, not the batch: `die` jumps back to the
+ * batch loop, which records the message. */
+static jmp_buf BATCH_JMP;
+static int IN_BATCH;
+static char ERRMSG[512];
+__attribute__((noreturn)) static void die(const char* fmt, ...) {
     va_list ap; va_start(ap, fmt);
-    fputs("cnlp solve: ", stderr); vfprintf(stderr, fmt, ap); fputc('\n', stderr);
-    va_end(ap); exit(2);
+    vsnprintf(ERRMSG, sizeof ERRMSG, fmt, ap); va_end(ap);
+    fprintf(stderr, "cnlp solve: %s\n", ERRMSG);
+    if (IN_BATCH) longjmp(BATCH_JMP, 1);
+    exit(2);
 }
 static int isfile(const char* p) { struct stat s; return stat(p, &s) == 0 && S_ISREG(s.st_mode); }
 static int isdir(const char* p) { struct stat s; return stat(p, &s) == 0 && S_ISDIR(s.st_mode); }
@@ -138,7 +146,7 @@ static const char* resolve_file(const char* a) {
     fprintf(stderr, "cnlp solve: no file `%s`: not a path, and no installed data-set file of that name%s\n",
             a, left < 10 ? "; did you mean" : "");
     for (int k = 0; k < 10 - left; k++) fputs(SUG[k], stderr);
-    exit(1);
+    die("no file `%s`", a);
 }
 
 /* `name:rest` where name is one of the model's readers or writers of `kind`, else NULL */
@@ -304,6 +312,8 @@ static int read_h5(const char* path, int64_t n, int64_t m, double* x, double* y,
 /* ── the solver ───────────────────────────────────────────────────────────────── */
 
 static void* load_solver(const char* s, char* path) {
+    static char loaded[PATH_MAX]; static void* handle;
+    if (handle && !strcmp(loaded, s)) { snprintf(path, PATH_MAX, "%s", loaded); return handle; }
     if (strchr(s, '/')) snprintf(path, PATH_MAX, "%s", s);
     else {
         snprintf(path, PATH_MAX, "%s/solvers/%s/lib/libcnlp_%s.so", home_dir(), s, s);
@@ -313,6 +323,7 @@ static void* load_solver(const char* s, char* path) {
     if (!h) die("cannot load the solver %s: %s", path, dlerror());
     int64_t (*ver)(void) = dlsym(h, "cnlp_solver_version");
     if (!ver || ver() / 1000 != CNLP_SOLVER_VERSION / 1000) die("%s is not a cnlp solver of interface %d.x", path, CNLP_SOLVER_VERSION / 1000);
+    snprintf(loaded, sizeof loaded, "%s", s); handle = h;
     return h;
 }
 
@@ -355,14 +366,31 @@ static void usage(void) {
          "  START    reader:path or a cnlp-solution file\n"
          "  OUTPUT   writer:path, or a path (the model's default writer, else cnlp-solution HDF5)\n"
          "  --solver ipopt (default) or a path to a cnlp solver library; key=value options go to it\n"
-         "  --device auto (default: the GPU when the model and the solver both run there), cpu or cuda");
+         "  --device auto (default: the GPU when the model and the solver both run there), cpu, cuda or cuda:N (GPU N)\n"
+         "  --batch FILE   solve one instance per line of FILE (- for stdin), loading the solver once; each line\n"
+         "                 is LIB[:MODEL] [INSTANCE...] [-s START] [-o OUTPUT]... [key=value...], and --solver,\n"
+         "                 --device and key=value given on the command line apply to every line\n"
+         "  --results FILE with --batch, a tab-separated row per instance");
 }
 
 static double now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + 1e-9 * t.tv_nsec; }
 
-int main(int argc, char** argv) {
+/* the outcome of one solve, for the batch summary */
+typedef struct { const char* status; double objective, secs, total; long long iterations; } outcome;
+static outcome LAST;
+
+/* the GPU of --device cuda:N, chosen before anything starts CUDA */
+static void select_gpu(const char* device) {
+    if (strncmp(device, "cuda:", 5)) return;
+    char* end; long k = strtol(device + 5, &end, 10);
+    if (*end || k < 0 || end == device + 5) die("--device cuda:N takes a GPU number, not `%s`", device);
+    static int chosen = -1;
+    if (chosen >= 0 && chosen != k) die("one process uses one GPU: cuda:%d was chosen, not %s", chosen, device);
+    if (chosen < 0) { char b[32]; snprintf(b, sizeof b, "%ld", k); setenv("CUDA_VISIBLE_DEVICES", b, 1); chosen = (int)k; }
+}
+
+static int run_one(int argc, char** argv) {
     double t_start = now();
-    if (argc < 2 || !strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) { usage(); return argc < 2; }
     const char *libspec = NULL, *start = NULL, *solver = "ipopt", *device = "auto";
     char *pos[64], *outs[16], *keys[128], *vals[128]; int npos = 0, nout = 0, nopt = 0;
     for (int i = 1; i < argc; i++) {
@@ -370,12 +398,16 @@ int main(int argc, char** argv) {
         if (!strcmp(a, "-s") || !strcmp(a, "--start")) { if (++i == argc) die("%s needs a value", a); start = argv[i]; }
         else if (!strcmp(a, "-o") || !strcmp(a, "--output")) { if (++i == argc) die("%s needs a value", a); if (nout < 16) outs[nout++] = argv[i]; }
         else if (!strcmp(a, "--solver")) { if (++i == argc) die("--solver needs a value"); solver = argv[i]; }
-        else if (!strcmp(a, "--device")) { if (++i == argc) die("--device needs a value"); device = argv[i]; }
+        else if (!strcmp(a, "--device")) { if (++i == argc) die("--device needs a value"); device = argv[i]; select_gpu(device); }
         else if (a[0] == '-' && a[1]) die("unknown option %s (see: cnlp solve --help)", a);
         else if (!libspec) libspec = a;
-        else if (strchr(a, '=') && a[0] != '=') { char* e = strchr(a, '='); *e = 0; keys[nopt] = a; vals[nopt++] = e + 1; }
+        else if (strchr(a, '=') && a[0] != '=' && nopt < 128) {   /* argv stays intact: a batch reuses it */
+            char* e = strchr(a, '='); keys[nopt] = strndup(a, e - a); vals[nopt++] = e + 1;
+        }
         else if (npos < 64) pos[npos++] = a;
     }
+    if (!libspec) die("no library given (see: cnlp solve --help)");
+    if (!strncmp(device, "cuda:", 5)) device = "cuda";
     /* LIB[:MODEL], split at the last colon when what follows names no path */
     char spec[PATH_MAX], model[128] = "", lib[PATH_MAX];
     snprintf(spec, sizeof spec, "%s", libspec);
@@ -392,14 +424,14 @@ int main(int argc, char** argv) {
     if (!model[0]) {
         if (!nm || !mn || nm() != 1) {
             fprintf(stderr, "cnlp solve: %s has several models; give one as LIB:MODEL\n", spec);
-            list_models(spec, nm, mn); exit(1);
+            list_models(spec, nm, mn); die("no model given");
         }
         int64_t L = mn(0, (uint8_t*)model, sizeof model - 1); model[L > 0 ? L : 0] = 0;
     }
     snprintf(PRE, sizeof PRE, "%s", model);
     if (!sym("nvar")) {
         fprintf(stderr, "cnlp solve: %s has no model `%s`\n", spec, model);
-        list_models(spec, nm, mn); exit(1);
+        list_models(spec, nm, mn); die("no model `%s`", model);
     }
 
     double t_lib = now() - t_lib0, t_inst0 = now();
@@ -494,5 +526,78 @@ int main(int argc, char** argv) {
     double t_out = now() - t_out0;
     printf("times: load model library %.3f s, instantiate %.3f s, load solver %.3f s, solve %.3f s, write %.3f s, total %.3f s\n",
            t_lib, t_inst, t_sol, secs, t_out, now() - t_start);
-    return R.status <= CNLP_ACCEPTABLE ? 0 : 1;
+    LAST = (outcome){ STATUS[R.status >= 0 && R.status <= 6 ? R.status : 6], R.objective, secs, now() - t_start, (long long)R.iterations };
+    int ok = R.status <= CNLP_ACCEPTABLE;
+    free(x0); free(lv); free(uv); free(lc); free(uc); free(y0); free(zl0); free(zu0);
+    free(R.x); free(R.y); free(R.zl); free(R.zu);
+    for (int k = 0; k < nopt; k++) free(keys[k]);
+    return ok ? 0 : 1;
+}
+
+/* split a batch line into words (whitespace; '...' or "..." quote a word; # starts a comment) */
+static int split_words(char* s, char** w, int cap) {
+    int n = 0;
+    while (*s) {
+        while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r') s++;
+        if (!*s || *s == '#') break;
+        if (n == cap) die("too many words on a line");
+        if (*s == '\'' || *s == '"') { char q = *s++; w[n++] = s; while (*s && *s != q) s++; if (*s) *s++ = 0; }
+        else { w[n++] = s; while (*s && *s != ' ' && *s != '\t' && *s != '\n' && *s != '\r') s++; if (*s) *s++ = 0; }
+    }
+    return n;
+}
+
+int main(int argc, char** argv) {
+    if (argc < 2 || !strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) { usage(); return argc < 2; }
+    const char *batch = NULL, *results = NULL;
+    char* common[256]; int ncommon = 0;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--batch")) { if (++i == argc) die("--batch needs a file"); batch = argv[i]; }
+        else if (!strcmp(argv[i], "--results")) { if (++i == argc) die("--results needs a file"); results = argv[i]; }
+        else if (ncommon < 256) common[ncommon++] = argv[i];
+    }
+    if (!batch) {
+        if (results) die("--results goes with --batch");
+        return run_one(argc, argv);
+    }
+    FILE* in = strcmp(batch, "-") ? fopen(batch, "r") : stdin;
+    if (!in) die("cannot read %s", batch);
+    FILE* out = NULL;
+    if (results) {
+        out = fopen(results, "w");
+        if (!out) die("cannot write %s", results);
+        fprintf(out, "instance\tstatus\tobjective\titerations\tsolve_s\ttotal_s\tmessage\n");
+    }
+    /* the command line's own words (--solver, --device, key=value) follow each line's */
+    char line[8192]; int nrun = 0, nok = 0, nerr = 0;
+    double t0 = now();
+    while (fgets(line, sizeof line, in)) {
+        char copy[8192]; snprintf(copy, sizeof copy, "%s", line);
+        copy[strcspn(copy, "\r\n")] = 0;
+        char* w[512]; w[0] = argv[0];
+        IN_BATCH = 1;
+        if (setjmp(BATCH_JMP)) {
+            nerr++;
+            if (out) { fprintf(out, "%s\terror\t\t\t\t\t%s\n", copy, ERRMSG); fflush(out); }
+            fflush(stdout); continue;
+        }
+        int nw = split_words(line, w + 1, 400);
+        if (!nw) continue;
+        for (int k = 0; k < ncommon; k++) w[1 + nw + k] = common[k];
+        nrun++;
+        printf("── %s\n", copy); fflush(stdout);
+        LAST = (outcome){ "error", NAN, NAN, NAN, -1 };
+        int rc = run_one(1 + nw + ncommon, w);
+        nok += rc == 0;
+        if (out) {
+            fprintf(out, "%s\t%s\t%.15g\t%lld\t%.3f\t%.3f\t\n", copy, LAST.status, LAST.objective,
+                    LAST.iterations, LAST.secs, LAST.total);
+            fflush(out);
+        }
+        fflush(stdout);
+    }
+    IN_BATCH = 0;
+    printf("batch: %d instance%s, %d solved or acceptable, %d not, %d error%s, %.3f s\n", nrun, nrun == 1 ? "" : "s",
+           nok, nrun - nok - nerr, nerr, nerr == 1 ? "" : "s", now() - t0);
+    return nok == nrun ? 0 : 1;
 }
