@@ -1,7 +1,10 @@
 # CNLPLib.jl
 
-[![CI](https://github.com/madsuite-org/CNLPLib.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/madsuite-org/CNLPLib.jl/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/madsuite-org/CNLPLib.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/madsuite-org/CNLPLib.jl)
+[![julia](https://github.com/madsuite-org/cnlplib/actions/workflows/julia.yml/badge.svg)](https://github.com/madsuite-org/cnlplib/actions/workflows/julia.yml)
+
+```julia
+using Pkg; Pkg.add(url = "https://github.com/madsuite-org/cnlplib", subdir = "interfaces/CNLPLib.jl")
+```
 
 Load a nonlinear program (NLP) exposed by a **shared library through a plain
 C interface** (the [cnlp ABI](https://cnlplib.madsuite.org)) and use it as an `NLPModels.AbstractNLPModel` — so any
@@ -145,5 +148,4 @@ at load time — so a single ~2 MB library file works in-process with nothing
 bundled. On other platforms the unbundled form is refused with an
 explanation; compile with `bundle = true` there.
 
-Sibling package: [`cnlpmodels`](https://github.com/madsuite-org/cnlpmodels-py) —
-the same consumer for Python (ctypes + numpy).
+Sibling package: [cnlplib](../cnlplib-py) — the same consumer for Python (ctypes + numpy).

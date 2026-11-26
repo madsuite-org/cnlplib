@@ -1,8 +1,11 @@
-name: CI
+# The Julia interface: CNLPLib.jl (interfaces/CNLPLib.jl).
+name: julia
 on:
   push:
-    branches: [master, main]
+    branches: [main]
+    paths: ["interfaces/CNLPLib.jl/**", ".github/workflows/julia.yml"]
   pull_request:
+    paths: ["interfaces/CNLPLib.jl/**", ".github/workflows/julia.yml"]
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -19,16 +22,17 @@ jobs:
           version: ${{ matrix.julia-version }}
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
+        with:
+          project: interfaces/CNLPLib.jl
       - uses: julia-actions/julia-runtest@v1
+        with:
+          project: interfaces/CNLPLib.jl
       - uses: julia-actions/julia-processcoverage@v1
         with:
-          directories: src
+          directories: interfaces/CNLPLib.jl/src,interfaces/CNLPLib.jl/ext
       - uses: codecov/codecov-action@v5
         with:
           files: lcov.info
-          # Org-level token, not OIDC: OIDC uploads broke on the org transfer
-          # (\"Repository not found\") while token uploads kept working.
+          flags: julia
           token: ${{ secrets.CODECOV_TOKEN }}
-          # The org-wide token cannot imply a repository; the slug says
-          # which repo this upload is for.
           slug: ${{ github.repository }}

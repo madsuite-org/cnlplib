@@ -5,7 +5,7 @@
 #   julia scripts/check-library.jl LIBPATH [N]
 using Pkg
 Pkg.activate(; temp = true)
-Pkg.add([Pkg.PackageSpec(url = "https://github.com/madsuite-org/CNLPLib.jl"),
+Pkg.add([Pkg.PackageSpec(url = "https://github.com/madsuite-org/cnlplib", subdir = "interfaces/CNLPLib.jl"),
          Pkg.PackageSpec(name = "NLPModels"), Pkg.PackageSpec(name = "CUDA")]; io = devnull)
 using NLPModels, CUDA, Libdl
 # CNLPLib (named CNLPModels before its first registration): found by UUID, either name

@@ -1,12 +1,15 @@
 # cnlplib
 
-[![CI](https://github.com/madsuite-org/cnlplib-py/actions/workflows/ci.yml/badge.svg)](https://github.com/madsuite-org/cnlplib-py/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/madsuite-org/cnlplib-py/branch/master/graph/badge.svg)](https://codecov.io/gh/madsuite-org/cnlplib-py)
+[![python](https://github.com/madsuite-org/cnlplib/actions/workflows/python.yml/badge.svg)](https://github.com/madsuite-org/cnlplib/actions/workflows/python.yml)
 
 Load a nonlinear program (NLP) exposed by a **shared library through a plain
 C interface** and use it as a numpy-backed model in Python — evaluate it, or
 solve it with any solver that takes dense/sparse NLP callbacks (Ipopt via
 `cyipopt` works out of the box; `scipy.optimize` too).
+
+```sh
+pip install "git+https://github.com/madsuite-org/cnlplib#subdirectory=interfaces/cnlplib-py"
+```
 
 No language runtime is required beyond Python itself: the wrapper is
 ctypes + numpy, and any library implementing the ABI below works, whatever
@@ -77,6 +80,4 @@ spelling as CNLPLib.jl's `CNLPModel(lib, :acopf, ...)`.
 Follow `cnlp.h`, and validate against `tests/fixtures/tinyqp.c` and this test suite,
 which compiles that file and checks every function against closed-form values.
 
-Sibling package:
-[`CNLPLib.jl`](https://github.com/madsuite-org/CNLPLib.jl) — the same
-consumer for Julia.
+Sibling package: [CNLPLib.jl](../CNLPLib.jl) — the same consumer for Julia.

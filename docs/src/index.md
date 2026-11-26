@@ -84,8 +84,8 @@ cnlp solve ./build/libmodels.so:wood 1000 -s previous.h5 -o sol.h5
 
 - [ExaModelsCompiler](https://github.com/madsuite-org/ExaModels.jl) compiles ExaModels
   models into cnlp libraries ahead of time, optionally with GPU evaluation.
-- [CNLPLib.jl](https://github.com/madsuite-org/CNLPLib.jl) (Julia) and
-  [cnlplib-py](https://github.com/madsuite-org/cnlplib-py) (Python, `import cnlplib`) load
+- [CNLPLib.jl](https://github.com/madsuite-org/cnlplib/tree/main/interfaces/CNLPLib.jl) (Julia) and
+  [cnlplib](https://github.com/madsuite-org/cnlplib/tree/main/interfaces/cnlplib-py) (Python, `import cnlplib`), in this repository, load
   cnlp libraries as NLPModels and Python objects; CNLPLib.jl also carries the Julia side of
   the solver interface.
 

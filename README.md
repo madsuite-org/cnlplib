@@ -1,6 +1,8 @@
 # cnlplib
 
 [![check](https://github.com/madsuite-org/cnlplib/actions/workflows/check.yml/badge.svg)](https://github.com/madsuite-org/cnlplib/actions/workflows/check.yml)
+[![julia](https://github.com/madsuite-org/cnlplib/actions/workflows/julia.yml/badge.svg)](https://github.com/madsuite-org/cnlplib/actions/workflows/julia.yml)
+[![python](https://github.com/madsuite-org/cnlplib/actions/workflows/python.yml/badge.svg)](https://github.com/madsuite-org/cnlplib/actions/workflows/python.yml)
 [![registry](https://github.com/madsuite-org/cnlplib/actions/workflows/pages.yml/badge.svg)](https://github.com/madsuite-org/cnlplib/actions/workflows/pages.yml)
 [![docs](https://img.shields.io/badge/docs-cnlplib.madsuite.org-blue)](https://cnlplib.madsuite.org)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -20,5 +22,9 @@ Documentation: **[cnlplib.madsuite.org](https://cnlplib.madsuite.org)**: the ABI
 [`cnlp` command](https://cnlplib.madsuite.org/cli/), and how to
 [publish a model library](https://cnlplib.madsuite.org/models/) or
 [add a solver](https://cnlplib.madsuite.org/solvers/).
+
+Interfaces, in [interfaces/](interfaces): [CNLPLib.jl](interfaces/CNLPLib.jl) (Julia: cnlp
+libraries as NLPModels, and the solver side of the interface) and
+[cnlplib](interfaces/cnlplib-py) (Python).
 
 MIT license. Each library in the registry carries its own license, recorded in its entry.
