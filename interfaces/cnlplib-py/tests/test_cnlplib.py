@@ -352,12 +352,12 @@ def test_schema_by_model_name(lib):
     assert [f["name"] for f in sch["fields"]] == ["n", "s", "w"]
 
 
-def test_at_sigil_is_accepted_by_lib(lib, tmp_path):
+def test_at_name_with_model_selection(lib, tmp_path):
     shutil.copy(pathlib.Path(lib._name), tmp_path / "libtoy9.so")
     cnlplib.set_path(tmp_path)
-    assert cnlplib.lib("@toy9") is cnlplib.lib("toy9")     # one cache entry
-    m = cnlplib.CModel("@toy9", "tq", 4)                      # with model selection
+    m = cnlplib.CModel("@toy9", "tq", 4)
     assert m.nvar == 4
+    assert cnlplib.lib("toy9") is cnlplib._resolve_spec("@toy9")   # one cache entry
 
 
 # ── Named blocks: the fixture publishes `x` (variable), `budget` (constraint), `w`

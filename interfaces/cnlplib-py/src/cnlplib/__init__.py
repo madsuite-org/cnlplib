@@ -66,9 +66,7 @@ def lib(name):
     """The library `name`, loaded and cached by name: `lib<name>.so` on the search path
     (also under `<dir>/<name>/lib/` and `<dir>/lib/`), else among the libraries the `cnlp`
     command installed (`$CNLPLIB_HOME/lib`), else installed there now from the registry
-    (`install`). `name@nightly` takes the registry's nightly build. A leading `@` is
-    accepted and ignored."""
-    name = name.removeprefix("@")
+    (`install`). `name@nightly` takes the registry's nightly build."""
     if name not in _LIBS:
         base = name.partition("@")[0]
         fname = f"lib{base}{_registry._ext()}"
