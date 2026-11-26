@@ -100,8 +100,14 @@ def test_name_based_loading(lib, tmp_path):
     assert cnlplib.lib("toy") is l1                      # cached
     m = cnlplib.CModel("@toy", 4, prefix="tq")         # name-based
     assert m.nvar == 4
-    with pytest.raises(FileNotFoundError):
-        cnlplib.lib("nonexistent")
+    # not found anywhere: the registry (a local, empty index) has no such library either
+    empty = tmp_path / "index.tsv"
+    empty.write_text("")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("CNLPLIB_INDEX", empty.as_uri())
+        mp.setenv("CNLPLIB_HOME", str(tmp_path / "home"))
+        with pytest.raises(FileNotFoundError, match="cnlplib index"):
+            cnlplib.lib("nonexistent")
 
 
 def test_lone_integer_takes_the_one_knob_constructor(lib):
@@ -221,6 +227,9 @@ def test_search_path_initializes_from_the_environment(monkeypatch, tmp_path):
     cnlplib.set_path()                      # empty the registry
     monkeypatch.setenv("CNLPMODELS_PATH", f"{tmp_path}:/nonexistent")
     assert cnlplib._paths() == [str(tmp_path), "/nonexistent"]
+    cnlplib.set_path()
+    monkeypatch.setenv("CNLPLIB_PATH", f"/a:{tmp_path}")       # the current name wins
+    assert cnlplib._paths() == ["/a", str(tmp_path)]
     cnlplib.set_path()                      # leave no residue for later tests
 
 

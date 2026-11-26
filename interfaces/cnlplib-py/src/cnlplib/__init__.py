@@ -34,12 +34,28 @@ import sys
 
 import numpy as np
 
-__all__ = ["BlockRef", "CModel", "argtype", "available_models", "lib", "load",
-           "multipliers",
-           "multipliers_L",
-           "multipliers_U", "schema", "set_path", "solution", "solve_ipopt"]
+__all__ = [
+    "BlockRef",
+    "CModel",
+    "argtype",
+    "available_models",
+    "data_file",
+    "install",
+    "lib",
+    "load",
+    "multipliers",
+    "multipliers_L",
+    "multipliers_U",
+    "schema",
+    "set_path",
+    "solution",
+    "solve_ipopt",
+    "update",
+]
 
+from . import registry as _registry
 from .ipopt import solve_ipopt
+from .registry import data_file, install, update
 
 _c_int = ctypes.c_int64
 _c_dbl = ctypes.c_double
@@ -54,7 +70,8 @@ _LIBS = {}
 def set_path(*dirs):
     """Set the library search path for name-based loading (`lib("acopf")`,
     `CModel("@acopf", ...)`). Initialized from the colon-separated
-    `CNLPMODELS_PATH` environment variable; calling this replaces it."""
+    `CNLPLIB_PATH` environment variable (or `CNLPMODELS_PATH`, its earlier name); calling
+    this replaces it."""
     _PATHS[:] = [os.fspath(d) for d in dirs]
     _LIBS.clear()
     return list(_PATHS)
@@ -62,7 +79,7 @@ def set_path(*dirs):
 
 def _paths():
     if not _PATHS:
-        env = os.environ.get("CNLPMODELS_PATH", "")
+        env = os.environ.get("CNLPLIB_PATH", os.environ.get("CNLPMODELS_PATH", ""))
         if env:
             _PATHS[:] = env.split(":")
     return _PATHS
@@ -71,23 +88,27 @@ def _paths():
 def lib(name):
     """Resolve `lib<name>.so` against the search path — also accepting the
     `<dir>/<name>/lib/` and `<dir>/lib/` layouts `compile_library` produces —
-    load it, and cache the handle by name.
+    then among the installed libraries (`$CNLPLIB_HOME/lib`, by default `~/.cnlplib/lib`,
+    shared with the `cnlp` command and CNLPLib.jl), and otherwise in the cnlplib registry,
+    installed there on first use (`install`); load it, and cache the handle by name.
+    `name@nightly` takes the registry's nightly build.
 
     A leading `@` is accepted and ignored: this function only ever takes a
     name, and the sigil spelling travels from `CModel`'s string argument."""
     name = name.removeprefix("@")
     if name not in _LIBS:
+        base = name.partition("@")[0]
         ext = {"win32": ".dll", "darwin": ".dylib"}.get(sys.platform, ".so")
-        fname = f"lib{name}{ext}"
-        for d in _paths():
-            for cand in (os.path.join(d, fname),
-                         os.path.join(d, name, "lib", fname),
-                         os.path.join(d, "lib", fname)):
-                if os.path.isfile(cand):
-                    _LIBS[name] = load(cand)
-                    return _LIBS[name]
-        where = ":".join(_paths()) or "empty — call set_path() or set CNLPMODELS_PATH"
-        raise FileNotFoundError(f"{fname} not found on the cnlplib path ({where})")
+        fname = f"lib{base}{ext}"
+        if base == name:
+            for d in _paths():
+                for cand in (os.path.join(d, fname),
+                             os.path.join(d, name, "lib", fname),
+                             os.path.join(d, "lib", fname)):
+                    if os.path.isfile(cand):
+                        _LIBS[name] = load(cand)
+                        return _LIBS[name]
+        _LIBS[name] = load(_registry.registry_lib(name))
     return _LIBS[name]
 
 
@@ -109,7 +130,7 @@ def _is_name(spec):
 # for libraries whose symbols are named independently of the file.
 def _default_prefix(spec):
     if _is_name(spec):
-        return spec[1:]
+        return spec[1:].partition("@")[0]
     base = os.path.splitext(os.path.basename(spec.rstrip("/")))[0]
     return base[3:] if base.startswith("lib") and len(base) > 3 else base
 
@@ -364,7 +385,8 @@ def _instantiate(lib, prefix, args):
                 f"its signature is {argtype(lib, prefix)!r}") from None
         fn.restype = _c_int
         fn.argtypes = [ctypes.c_char_p]
-        mid = int(fn(args[0].encode()))
+        # a data-set file by name, as `cnlp solve` takes one; any other string as given
+        mid = int(fn(_registry.string_arg(args[0]).encode()))
         if mid <= 0:
             raise RuntimeError(f"{prefix}_new_str returned {mid}")
         return mid

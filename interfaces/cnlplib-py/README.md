@@ -20,7 +20,7 @@ suite compiles and exercises it end to end.
 ```python
 import cnlplib
 
-cnlplib.set_path("/opt/models")          # or the CNLPMODELS_PATH env variable
+cnlplib.set_path("/opt/models")          # or the CNLPLIB_PATH env variable
 
 m = cnlplib.CModel("@mymodel", 1000)     # resolves libmymodel.so
 # m = cnlplib.CModel("/path/to/mymodel", 1000)   # or a literal path
@@ -32,6 +32,20 @@ x, info = cnlplib.solve_ipopt(m)         # cyipopt, if installed
 `jac(x)`, `hess_structure()`, `hess(x, y, obj_weight=1.0)` — numpy in,
 numpy out, structure indices 0-based per Python convention. Any number of
 model instances may coexist per library.
+
+**Libraries from the [cnlplib registry](https://cnlplib.madsuite.org/registry/)** need no
+separate install step: a name that is neither on the path nor installed is installed on first
+use, into `$CNLPLIB_HOME` (default `~/.cnlplib`) exactly as `cnlp install` would, with the
+data sets it requires, after checking it against the SHA-256 its release publishes. One copy
+serves the `cnlp` command, Julia (CNLPLib.jl) and Python, and is found offline afterwards. The
+library's CUDA build is taken on a machine with an NVIDIA GPU (`CNLPLIB_DEVICE=cpu` takes the
+host build); `name@nightly` is the nightly build, and `cnlplib.update("lv")` fetches a newer
+release.
+
+```python
+m = cnlplib.CModel("@lv@nightly", "wood", 10000)
+m = cnlplib.CModel("@emp@nightly", "acp", "pglib_opf_case118_ieee")   # a data-set file, by name
+```
 
 ## The C ABI
 
