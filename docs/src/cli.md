@@ -46,9 +46,9 @@ is complete.
 | data sets | `~/.cnlplib/data/<name>/` |
 
 A library carries its own copies of common libraries (OpenSSL, curl, libstdc++, ...).
-`cnlp install` gives them private names (`libssl.so.3` is known as `cnlssl.so.3` inside the
-store), so a program that has already loaded its own copies, such as Python after `import
-hashlib`, keeps them apart from the library's. The files keep their names; it runs after
+`cnlp install` gives each runtime's copies private names (`libssl.so.3` is known as, say,
+`ct2ssl.so.3` inside the store), so a program that has already loaded its own copies, such as
+Python after `import hashlib`, or another library's runtime, keeps them apart. The files keep their names; it runs after
 every install, and running it again changes nothing.
 
 ## Solving

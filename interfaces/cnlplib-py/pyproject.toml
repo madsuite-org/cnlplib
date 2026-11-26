@@ -10,8 +10,5 @@ description = "cnlp libraries (compiled nonlinear programs, cnlp.h) as numpy-bac
 requires-python = ">=3.10"
 dependencies = ["numpy"]
 
-[project.optional-dependencies]
-solve = ["h5py"]
-
 [tool.setuptools.packages.find]
 where = ["src"]

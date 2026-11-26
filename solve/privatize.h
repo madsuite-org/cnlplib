@@ -1,49 +1,82 @@
 /* Private names for the shared libraries of a cnlp store (`cnlp-solve --privatize`).
  *
  * A library bundle carries its own copies of common libraries (OpenSSL, curl, libstdc++,
- * ...). The dynamic loader matches libraries by name, so when the host process has already
- * loaded its own copy under the same name (Python's hashlib loads the system OpenSSL, say),
- * the bundle is handed that copy and may fail to load. `cnlp install` therefore renames them:
- * in every ELF shared library of the store, each name that belongs to a library the store
- * carries (DT_SONAME, DT_NEEDED, and the file names of its version needs) changes from
- * `lib...` to `cnl...`. The new name has the same length, so the string table is edited in
- * place; a link under the new name is added wherever the old name is, and the files keep
- * their names, so whatever opens them by path still finds them. Running it again changes
- * nothing. ELF64 little-endian (Linux x86_64, aarch64); other files are left alone.
+ * libblastrampoline, ...). The dynamic loader matches libraries by name, so a copy already
+ * loaded under the same name is handed to whoever asks next: the host process's own (Python's
+ * hashlib loads the system OpenSSL), or another runtime's (a model library and a solver each
+ * carry a Julia runtime, and sharing one libblastrampoline lets one reset the other's BLAS).
+ * `cnlp install` therefore gives each runtime's libraries names of their own: in every ELF
+ * library of the store, each name that belongs to a library the store carries (DT_SONAME,
+ * DT_NEEDED, the file names of its version needs) changes from `lib...` to a three-character
+ * prefix of the directory that provides it (`c4k...`), the same length, so the string table is
+ * edited in place (Julia's own LLVM and libjulia keep their names). A link under the new name is
+ * added beside every entry with the old one, and
+ * the files keep their names, so whatever opens them by path still finds them. Running it
+ * again changes nothing. ELF64 little-endian (Linux x86_64, aarch64); other files are left
+ * alone.
+ *
+ * Scopes: each directory of $CNLPLIB_HOME/artifacts (a shared runtime), and each installed
+ * library's or solver's lib/ (its own files, and the links its lib/julia makes into a runtime).
+ * A name is renamed after the directory its file actually lives in, so a library and the
+ * runtime it links agree, and two runtimes never share a name.
  */
 #include <fcntl.h>
 #include <ftw.h>
+#include <libgen.h>
 #include <sys/mman.h>
 #include <unistd.h>
-
-#define PV_OLD "lib"
-#define PV_NEW "cnl"
 
 typedef struct { char** v; int n, cap; } pv_list;
 static void pv_push(pv_list* l, const char* s) {
     if (l->n == l->cap) { l->cap = l->cap ? 2 * l->cap : 64; l->v = realloc(l->v, l->cap * sizeof *l->v); }
     l->v[l->n++] = strdup(s);
 }
-static int pv_has(const pv_list* l, const char* s) {
-    for (int k = 0; k < l->n; k++) if (!strcmp(l->v[k], s)) return 1;
-    return 0;
-}
 
-static pv_list PV_FILES, PV_NAMES;   /* the ELF files under the roots; the names they carry */
+/* the scope being processed: its ELF files, and its library names with the prefix of the
+ * directory that provides each */
+static pv_list PV_FILES, PV_NAMES, PV_PREFIX, PV_ENTRIES;
+static int PV_LINKS;
+
+/* three characters for a directory, from its path under the store (stable if the store moves) */
+static void pv_prefix(const char* dir, char out[4]) {
+    const char* h = home_dir(); size_t L = strlen(h);
+    const char* rel = !strncmp(dir, h, L) && dir[L] == '/' ? dir + L + 1 : dir;
+    uint64_t x = 1469598103934665603ULL;
+    for (const char* c = rel; *c; c++) { x ^= (unsigned char)*c; x *= 1099511628211ULL; }
+    static const char A[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+    out[0] = 'c'; out[1] = A[x % 36]; out[2] = A[(x / 36) % 36]; out[3] = 0;
+}
+static const char* pv_lookup(const char* name) {
+    for (int k = 0; k < PV_NAMES.n; k++) if (!strcmp(PV_NAMES.v[k], name)) return PV_PREFIX.v[k];
+    return NULL;
+}
 
 static int pv_is_elf(const char* p) {
     unsigned char h[6]; int fd = open(p, O_RDONLY); if (fd < 0) return 0;
     int ok = read(fd, h, 6) == 6 && !memcmp(h, "\177ELF", 4) && h[4] == 2 && h[5] == 1;   /* ELF64 LE */
     close(fd); return ok;
 }
-static int pv_collect(const char* p, const struct stat* st, int type, struct FTW* f) {
-    (void)st; (void)f;
-    if (type == FTW_F && strstr(p, ".so") && pv_is_elf(p)) pv_push(&PV_FILES, p);
+/* every `lib*.so*` entry of the scope (file or link) with the prefix of the directory its file
+ * is in; every ELF file */
+static int pv_scan(const char* p, const struct stat* st, int type, struct FTW* f) {
+    (void)st;
+    const char* base = p + f->base;
+    /* Julia's own LLVM and libjulia keep their names: no host carries them (`libLLVM.so.18.1jl`
+     * is Julia's build), and code loaded from outside the store may ask for them by name */
+    int julia_own = !strncmp(base, "libLLVM", 7) || !strncmp(base, "libjulia", 8);
+    if ((type == FTW_F || type == FTW_SL) && !strncmp(base, "lib", 3) && strstr(base, ".so") && !julia_own) {
+        char real[PATH_MAX];
+        if (realpath(p, real) && !pv_lookup(base)) {
+            char pre[4]; pv_prefix(dirname(real), pre);
+            pv_push(&PV_NAMES, base); pv_push(&PV_PREFIX, pre); pv_push(&PV_ENTRIES, p);
+        }
+    }
+    if (type == FTW_F && strstr(base, ".so") && pv_is_elf(p)) pv_push(&PV_FILES, p);
     return 0;
 }
 
-/* The dynamic section of a mapped ELF64 file: the file offsets of the string table and of the
- * strings named by DT_SONAME / DT_NEEDED / version-need file names. Returns the count. */
+/* The file offsets of the strings a mapped ELF64 file names libraries by: DT_SONAME,
+ * DT_NEEDED, and its version needs' file names. */
 typedef struct { uint32_t type, flags; uint64_t off, vaddr, paddr, filesz, memsz, align; } pv_phdr;
 static int64_t pv_off(const unsigned char* b, uint64_t phoff, int phnum, uint64_t vaddr) {
     for (int k = 0; k < phnum; k++) {
@@ -52,18 +85,18 @@ static int64_t pv_off(const unsigned char* b, uint64_t phoff, int phnum, uint64_
     }
     return -1;
 }
-static int pv_strings(const unsigned char* b, size_t size, uint64_t* out, int cap, uint64_t* soname) {
+static int pv_strings(const unsigned char* b, size_t size, uint64_t* out, int cap) {
     uint64_t phoff; uint16_t phnum; memcpy(&phoff, b + 0x20, 8); memcpy(&phnum, b + 0x38, 2);
     if (phoff + (uint64_t)phnum * sizeof(pv_phdr) > size) return 0;
     const pv_phdr* dyn = NULL;
     for (int k = 0; k < phnum; k++) { const pv_phdr* h = (const pv_phdr*)(b + phoff + (uint64_t)k * sizeof(pv_phdr)); if (h->type == 2) dyn = h; }
     if (!dyn || dyn->off + dyn->filesz > size) return 0;
-    uint64_t strtab = 0, verneed = 0, nverneed = 0, refs[256]; int nref = 0, sref = -1;
+    uint64_t strtab = 0, verneed = 0, nverneed = 0, refs[256]; int nref = 0;
     for (uint64_t o = dyn->off; o + 16 <= dyn->off + dyn->filesz; o += 16) {
         int64_t tag; uint64_t val; memcpy(&tag, b + o, 8); memcpy(&val, b + o + 8, 8);
         if (tag == 0) break;
         if (tag == 5) strtab = val;
-        else if ((tag == 1 || tag == 14) && nref < 256) { if (tag == 14) sref = nref; refs[nref++] = val; }
+        else if ((tag == 1 || tag == 14) && nref < 256) refs[nref++] = val;
         else if (tag == 0x6FFFFFFE) verneed = val;
         else if (tag == 0x6FFFFFFF) nverneed = val;
     }
@@ -81,51 +114,34 @@ static int pv_strings(const unsigned char* b, size_t size, uint64_t* out, int ca
     int n = 0;
     for (int k = 0; k < nref && n < cap; k++) {
         uint64_t s = (uint64_t)st + refs[k];
-        if (s < size) { if (k == sref && soname) *soname = s; out[n++] = s; }
+        int seen = 0; for (int j = 0; j < n; j++) seen |= out[j] == s;
+        if (s < size && !seen) out[n++] = s;
     }
     return n;
 }
 
-/* map a file; NULL when it cannot be read */
-static unsigned char* pv_map(const char* p, size_t* size) {
-    int fd = open(p, O_RDONLY); if (fd < 0) return NULL;
-    struct stat st; if (fstat(fd, &st) || st.st_size < 64) { close(fd); return NULL; }
-    void* m = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0); close(fd);
-    if (m == MAP_FAILED) return NULL;
-    *size = st.st_size; return m;
-}
-
-/* the name a library is known by, as it was before any renaming */
-static void pv_names(const char* p) {
-    size_t size; unsigned char* b = pv_map(p, &size); if (!b) return;
-    uint64_t offs[256], so = 0; pv_strings(b, size, offs, 256, &so);
-    if (so && so < size) {
-        const char* s = (const char*)b + so;
-        if (strnlen(s, size - so) < size - so && (!strncmp(s, PV_OLD, 3) || !strncmp(s, PV_NEW, 3))) {
-            char name[512]; snprintf(name, sizeof name, "%s%s", PV_OLD, s + 3);
-            if (!pv_has(&PV_NAMES, name)) pv_push(&PV_NAMES, name);
-        }
-    }
-    munmap(b, size);
-}
-
-/* rename, in one file, every name the store carries; 1 if the file changed */
+/* rename, in one file, every library name of the scope; 1 if the file changed */
 static int pv_edit(const char* p) {
-    size_t size; unsigned char* b = pv_map(p, &size); if (!b) return 0;
-    uint64_t offs[256]; int n = pv_strings(b, size, offs, 256, NULL), edits = 0;
-    uint64_t at[256];
+    int fd = open(p, O_RDONLY); if (fd < 0) return 0;
+    struct stat st; if (fstat(fd, &st) || st.st_size < 64) { close(fd); return 0; }
+    size_t size = st.st_size;
+    void* m = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0); close(fd);
+    if (m == MAP_FAILED) return 0;
+    const unsigned char* b = m;
+    uint64_t offs[256]; int n = pv_strings(b, size, offs, 256), edits = 0;
+    uint64_t at[256]; const char* to[256];
     for (int k = 0; k < n; k++) {
         const char* s = (const char*)b + offs[k];
-        if (strnlen(s, size - offs[k]) < size - offs[k] && pv_has(&PV_NAMES, s)) at[edits++] = offs[k];
+        const char* pre = strnlen(s, size - offs[k]) < size - offs[k] ? pv_lookup(s) : NULL;
+        if (pre) { at[edits] = offs[k]; to[edits++] = pre; }
     }
-    if (!edits) { munmap(b, size); return 0; }
+    if (!edits) { munmap(m, size); return 0; }
     /* written to a new file and renamed over the old: a process that has it open keeps its copy */
     unsigned char* c = malloc(size);
-    if (!c) { munmap(b, size); die("out of memory"); }
-    memcpy(c, b, size); munmap(b, size);
-    for (int k = 0; k < edits; k++) memcpy(c + at[k], PV_NEW, 3);
+    if (!c) { munmap(m, size); die("out of memory"); }
+    memcpy(c, b, size); munmap(m, size);
+    for (int k = 0; k < edits; k++) memcpy(c + at[k], to[k], 3);
     char tmp[PATH_MAX]; snprintf(tmp, sizeof tmp, "%s.cnlp-priv", p);
-    struct stat st; stat(p, &st);
     FILE* f = fopen(tmp, "wb");
     if (!f) { free(c); die("cannot write %s", tmp); }
     size_t w = fwrite(c, 1, size, f); free(c);
@@ -135,41 +151,43 @@ static int pv_edit(const char* p) {
     return 1;
 }
 
-/* a link under the new name beside every entry with an old one */
-static int PV_LINKS;
-static int pv_link(const char* p, const struct stat* st, int type, struct FTW* f) {
-    (void)st; (void)type;
-    const char* base = p + f->base;
-    if (!pv_has(&PV_NAMES, base)) return 0;
-    char link[PATH_MAX]; snprintf(link, sizeof link, "%.*s%s%s", f->base, p, PV_NEW, base + 3);
-    struct stat ls;
-    if (lstat(link, &ls) && !symlink(base, link)) PV_LINKS++;
-    return 0;
+static void pv_clear(pv_list* l) { for (int k = 0; k < l->n; k++) free(l->v[k]); l->n = 0; }
+
+/* one scope: its names, its files edited, a link under each new name */
+static int pv_scope(const char* dir) {
+    pv_clear(&PV_FILES); pv_clear(&PV_NAMES); pv_clear(&PV_PREFIX); pv_clear(&PV_ENTRIES);
+    if (!isdir(dir)) return 0;
+    nftw(dir, pv_scan, 32, FTW_PHYS);
+    int changed = 0;
+    for (int k = 0; k < PV_FILES.n; k++) changed += pv_edit(PV_FILES.v[k]);
+    for (int k = 0; k < PV_ENTRIES.n; k++) {
+        const char* e = PV_ENTRIES.v[k]; const char* base = strrchr(e, '/') + 1;
+        char link[PATH_MAX]; snprintf(link, sizeof link, "%.*s%s%s", (int)(base - e), e, PV_PREFIX.v[k], base + 3);
+        struct stat ls;
+        if (lstat(link, &ls) && !symlink(base, link)) PV_LINKS++;
+    }
+    return changed;
 }
 
-/* `cnlp-solve --privatize [DIR...]`: the store's shared runtime ($CNLPLIB_HOME/artifacts) and
- * the given library or solver directories; with none, every library and solver installed */
-static void pv_installed(pv_list* dirs, const char* kind) {
+static void pv_subdirs(pv_list* dirs, const char* kind, const char* sub) {
     char d[PATH_MAX]; snprintf(d, sizeof d, "%s/%s", home_dir(), kind);
     DIR* dd = opendir(d); if (!dd) return;
     for (struct dirent* e; (e = readdir(dd));) {
         if (e->d_name[0] == '.') continue;
-        char p[PATH_MAX]; snprintf(p, sizeof p, "%s/%s/lib", d, e->d_name);
+        char p[PATH_MAX]; snprintf(p, sizeof p, "%s/%s%s", d, e->d_name, sub);
         if (isdir(p)) pv_push(dirs, p);
     }
     closedir(dd);
 }
-static int privatize(int ndirs, char** given) {
+
+/* `cnlp-solve --privatize`: every shared runtime of the store, and every library and solver */
+static int privatize(int nargs, char** args) {
+    (void)args;
+    if (nargs) die("--privatize takes no arguments: it works on the whole store ($CNLPLIB_HOME)");
     pv_list dirs = { 0 };
-    char art[PATH_MAX]; snprintf(art, sizeof art, "%s/artifacts", home_dir());
-    pv_push(&dirs, art);
-    if (ndirs) for (int k = 0; k < ndirs; k++) pv_push(&dirs, given[k]);
-    else { pv_installed(&dirs, "lib"); pv_installed(&dirs, "solvers"); }
-    for (int k = 0; k < dirs.n; k++) if (isdir(dirs.v[k])) nftw(dirs.v[k], pv_collect, 32, FTW_PHYS);
-    for (int k = 0; k < PV_FILES.n; k++) pv_names(PV_FILES.v[k]);
+    pv_subdirs(&dirs, "artifacts", ""); pv_subdirs(&dirs, "lib", "/lib"); pv_subdirs(&dirs, "solvers", "/lib");
     int changed = 0;
-    for (int k = 0; k < PV_FILES.n; k++) changed += pv_edit(PV_FILES.v[k]);
-    for (int k = 0; k < dirs.n; k++) if (isdir(dirs.v[k])) nftw(dirs.v[k], pv_link, 32, FTW_PHYS);
-    if (changed || PV_LINKS) printf("Gave %d bundled libraries private names (%d files, %d links)\n", PV_NAMES.n, changed, PV_LINKS);
+    for (int k = 0; k < dirs.n; k++) changed += pv_scope(dirs.v[k]);
+    if (changed || PV_LINKS) printf("Gave the bundled libraries private names (%d files, %d links)\n", changed, PV_LINKS);
     return 0;
 }

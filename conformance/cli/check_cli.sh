@@ -58,8 +58,9 @@ cnlp list | grep -q 'cpu' && ok "cnlp list shows backends" || bad "cnlp list sho
 [ "$(cnlp list | grep -c '^  cnlptest ')" = 1 ] && cnlp list | grep '^  cnlptest ' | grep -q 'latest' && ok "cnlp list has one row per library, with what is installed" || bad "cnlp list rows: $(cnlp list)"
 cnlp install cnlptest 2>&1 | grep -q 'up to date' && ok "a second install is a no-op" || bad "a second install is a no-op"
 L=$CNLPLIB_HOME/lib/cnlptest/lib
-grep -q 'cnlcnlpdep.so.1' "$L/libcnlptest.so" && ! grep -q 'libcnlpdep.so.1' "$L/libcnlptest.so" && grep -q 'cnlcnlpdep.so.1' "$L/libcnlpdep.so.1" \
-    && [ -L "$L/cnlcnlpdep.so.1" ] && ok "the library's own libraries get private names (cnl...), with a link under each" \
+P=$(ls "$L" | grep -E '^c[0-9a-z]{2}cnlpdep\.so\.1$')
+[ -n "$P" ] && [ -L "$L/$P" ] && grep -q "$P" "$L/libcnlptest.so" && ! grep -q 'libcnlpdep.so.1' "$L/libcnlptest.so" \
+    && grep -q "$P" "$L/libcnlpdep.so.1" && ok "the library's own libraries get private names ($P), with a link under each" \
     || bad "private names: $(ls -l "$L")"
 cnlp-solve --privatize | grep -q . && bad "giving private names twice changes something" || ok "giving private names again changes nothing"
 
@@ -105,13 +106,19 @@ cnlp solve @cnlptest:pn 6 --device tpu $S > "$W/e.log" 2>&1 && bad "an unknown d
 cnlp solve @cnlptest:pn 6 $S > "$W/s.log" 2>&1 && grep -q '(cpu)' "$W/s.log" && ok "without a device tier the solve runs on the cpu, and says so" || bad "cpu solve: $(cat "$W/s.log")"
 cnlp solve @cnlptest:pb 5 > "$W/e.log" 2>&1 && bad "a wrong number of arguments is refused" || { grep -q 'takes 2' "$W/e.log" && ok "a wrong number of arguments is refused" || bad "argument count message: $(cat "$W/e.log")"; }
 cnlp solve @nolib:x 1 > "$W/e.log" 2>&1 && bad "a missing library is refused" || { grep -q 'cnlp install' "$W/e.log" && ok "a missing library is refused, with what to install" || bad "missing library message: $(cat "$W/e.log")"; }
-# Python: cnlplib.solve runs `cnlp solve` and reads the solution back
+# Python: cnlplib.solve loads the installed solver in-process and hands it the library's functions
 PYTHONPATH="$ROOT/interfaces/cnlplib-py/src" "$PY" -c '
 import cnlplib, numpy as np
-for r in (cnlplib.solve("@cnlptest:pn", 6), cnlplib.solve(cnlplib.CModel("@cnlptest", "pn", 6), tol=1e-10)):
+m = cnlplib.CModel("@cnlptest", "pn", 6)
+for r in (cnlplib.solve(m), cnlplib.solve(m, tol=1e-10), cnlplib.solve(m, solver="ipopt", device="cpu")):
     assert r.status == "solved" and abs(r.objective - 0.5) < 1e-6, r
-    assert np.allclose(r.solution, [0.5, 0.5, 1, 1, 1, 1], atol=1e-6) and r.solver == "ipopt" and r.device == "cpu"
-' > "$W/py.log" 2>&1 && ok "Python: cnlplib.solve (a spec, or a CModel) through cnlp solve" || bad "cnlplib.solve: $(cat "$W/py.log")"
+    assert np.allclose(r.solution, [0.5, 0.5, 1, 1, 1, 1], atol=1e-6) and r.solver == "ipopt" and r.device == "cpu", r
+assert cnlplib.load_solver("ipopt") is cnlplib.load_solver("ipopt")
+try:
+    cnlplib.solve(m, device="cuda"); raise SystemExit("device=cuda without a CUDA tier was accepted")
+except ValueError as e:
+    assert "CUDA tier" in str(e), e
+' > "$W/py.log" 2>&1 && ok "Python: cnlplib.solve with an installed solver, loaded once, in-process" || bad "cnlplib.solve: $(cat "$W/py.log")"
 
 # ── cnlp up / remove ────────────────────────────────────────────────────────────
 cnlp up > "$W/u.log" 2>&1 && ok "cnlp up" || bad "cnlp up: $(cat "$W/u.log")"
