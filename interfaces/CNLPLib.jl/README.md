@@ -48,7 +48,7 @@ out:
 
 ```julia
 using CUDA, cuMadNLP
-m = CNLPModel("@mymodel", 100_000; device = :cuda)
+m = CNLPModel("@mymodel", 100_000; backend = CUDABackend())
 madnlp(m)
 ```
 

@@ -1,7 +1,7 @@
 """
 CUDA for libraries that export the cnlp device tier (`P_device`, `P_*_d`).
 
-`CNLPModel(lib, args...; device = :cuda)` returns a `CNLPModel{CuVector{Float64}}`: the
+`CNLPModel(lib, args...; backend = CUDABackend())` returns a `CNLPModel{CuVector{Float64}}`: the
 same instance, with its metadata and buffers on the device, evaluated through the device
 callbacks on device pointers. This extension only supplies what differs from the host:
 the pointer conversion, the stream handoff, and the product kernels.
@@ -9,7 +9,7 @@ the pointer conversion, the stream handoff, and the product kernels.
 module CNLPLibCUDAExt
 
 using CNLPLib, NLPModels, CUDACore
-using CUDACore: CuArray, CuVector, StridedCuVector
+using CUDACore: CuArray, CuVector, StridedCuVector, CUDABackend
 using CNLPLib: CNLPModel
 import Libdl
 
@@ -23,7 +23,7 @@ CNLPLib._ptr(a::StridedCuVector{Float64}) = reinterpret(Ptr{Cdouble}, UInt(point
 # what orders the library's reads after our writes.
 CNLPLib._sync(::CuModel) = CUDACore.synchronize()
 
-function CNLPLib._device_model(::Val{:cuda}, m::CNLPModel{Vector{Float64}})
+function CNLPLib._device_model(::CUDABackend, m::CNLPModel{Vector{Float64}})
     sym(s) = Symbol(m.prefix, "_", s)
     dp = Libdl.dlsym(m.lib.handle, sym(:device); throw_error = false)
     dp === nothing && throw(ArgumentError(

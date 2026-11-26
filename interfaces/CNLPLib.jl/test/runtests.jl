@@ -7,6 +7,7 @@ using MadNLP
 # The shared fixture (conformance/tinyqp.c), compiled against this repository's cnlp.h.
 const ROOT = normpath(joinpath(@__DIR__, "..", "..", ".."))
 const FIXDIR = joinpath(ROOT, "conformance")
+struct NoSuchBackend end   # a backend no extension handles
 const LIBPATH = joinpath(mktempdir(), "libtinyqp.so")
 cc = something(Sys.which("cc"), Sys.which("gcc"), Sys.which("clang"))
 @test cc !== nothing
@@ -23,7 +24,7 @@ run(`$cc -shared -fPIC -O2 -I$ROOT -o $LIBPATH $(joinpath(FIXDIR, "tinyqp.c"))`)
         m = CNLPModel(lib, 4; prefix = "tq")
         @test m isa CNLPModel{Vector{Float64}} && m isa AbstractNLPModel{Float64, Vector{Float64}}
         # a device model needs its extension (and a library with the device tier)
-        @test_throws ArgumentError CNLPModel(lib, 4; prefix = "tq", device = :cuda)
+        @test_throws ArgumentError CNLPModel(lib, 4; prefix = "tq", backend = NoSuchBackend())
     end
 
     m = CNLPModel(lib, 4; prefix = "tq")

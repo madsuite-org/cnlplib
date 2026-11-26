@@ -404,7 +404,7 @@ end
     device_problem(p::ModelProblem, md::CNLPModel) -> Ref{CNLPDeviceProblem}
 
 The device problem for `p = problem(m)`, evaluating `md`, the same instance on the device
-(`CNLPModel(...; device = :cuda)`), to hand a cnlp solver's `cnlp_solve_device` with `p`.
+(`CNLPModel(...; backend = CUDABackend())`), to hand a cnlp solver's `cnlp_solve_device` with `p`.
 Keep `p` alive while it is used.
 """
 function device_problem(h::ModelProblem, md::CNLPModel)

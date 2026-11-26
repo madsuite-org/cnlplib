@@ -6,7 +6,7 @@ NLPModels solver (MadNLP, Ipopt, ...), and the Julia side of the solver interfac
 (`cnlp_solver.h`).
 
 A model is a `CNLPModel{VT}`: `VT = Vector{Float64}` evaluates through the library's
-host callbacks; with `device = :cuda` (CUDA extension) `VT` is a `CuVector` and the same
+host callbacks; with `backend = CUDABackend()` (CUDA extension) `VT` is a `CuVector` and the same
 instance evaluates through the device tier. A library may carry several models, one
 symbol prefix each (`CNLPModel("@grid", :acopf, ...)`), and any number of instances.
 
@@ -409,14 +409,15 @@ end
 
 """
     CNLPModel(lib::CLib, arg1, arg2, ...; prefix = "rec", name = basename(lib.path),
-              device = :cpu, input = nothing)
+              backend = nothing, input = nothing)
 
 A model instance of `lib`, as an `AbstractNLPModel`. The arguments instantiate it: one
 value per field of the model's schema, in the library's order, each a number, a numeric
 vector, or a table (a vector of named tuples). A lone integer or string goes to the
 model's own entry point when it has one; no arguments instantiate a model that takes none.
 `input = :reader => path` instantiates through one of the model's instance readers
-instead ([`readers`](@ref)). `device = :cuda` evaluates on the GPU (CUDA extension).
+instead ([`readers`](@ref)). `backend = CUDABackend()` evaluates on the GPU through the
+library's device tier (CUDA extension: `using CUDA` or `using CUDACore`).
 
     m = CNLPModel(lib, 1000; prefix = "rosen")             # rosen_new(1000)
     m = CNLPModel(lib, [(i = 1, pd = 0.4)], [0.9], 100.0)  # table, array, scalar
@@ -426,7 +427,7 @@ function CNLPModel(
     args...;
     prefix::AbstractString = "rec",
     name::AbstractString = basename(lib.path),
-    device::Symbol = :cpu,
+    backend = nothing,
     input::Union{Nothing, Pair} = nothing,
 )
     sym(s) = Symbol(prefix, "_", s)
@@ -476,16 +477,16 @@ function CNLPModel(
     # once more: in a multi-model library, the structure calls above are the first entries
     # into this model's code and can clobber the trampoline again
     restore_blas!(lib)
-    device === :cpu && return m
-    hasmethod(_device_model, Tuple{Val{device}, typeof(m)}) || throw(ArgumentError(
-        "`device = :$device` needs its extension loaded (for :cuda, `using CUDA` or `using CUDACore`)"))
-    return _device_model(Val(device), m)
+    backend === nothing && return m
+    hasmethod(_device_model, Tuple{typeof(backend), typeof(m)}) || throw(ArgumentError(
+        "no GPU support for `backend = $backend`: for CUDABackend(), load `CUDA` or `CUDACore`"))
+    return _device_model(backend, m)
 end
 
 """
-    _device_model(::Val{device}, m::CNLPModel)
+    _device_model(backend, m::CNLPModel)
 
-The same instance as `m` with `VT` on `device`, evaluated through the device tier.
+The same instance as `m` with `VT` on `backend`, evaluated through the device tier.
 Methods live in package extensions.
 """
 function _device_model end

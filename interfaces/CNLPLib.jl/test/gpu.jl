@@ -10,7 +10,7 @@ lib = CNLPLib.load(ARGS[1])
 model = Symbol(ARGS[2])
 args = parse.(Int, ARGS[3:end])
 h = CNLPModel(lib, model, args...)
-d = CNLPModel(lib, model, args...; device = :cuda)
+d = CNLPModel(lib, model, args...; backend = CUDABackend())
 n, m = h.meta.nvar, h.meta.ncon
 close(a, b) = maximum(abs, Array(a) .- b; init = 0.0) <= 1e-12 * max(1.0, maximum(abs, b; init = 0.0))
 

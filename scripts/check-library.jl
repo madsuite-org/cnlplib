@@ -47,7 +47,7 @@ for model in CNLPLib.available_models(lib)
         f, g, c, J, H = v
         devp = Libdl.dlsym(lib.handle, Symbol(model, "_device"); throw_error = false)
         if gpu && devp !== nothing
-            d = CNLPModel(lib, model, args...; device = :cuda)
+            d = CNLPModel(lib, model, args...; backend = CUDABackend())
             X, Y = CuArray(x), CuArray(y)
             e = max(abs(obj(d, X) - f) / max(1, abs(f)), rel(grad(d, X), g), rel(cons(d, X), c),
                     rel(jac_coord(d, X), J), rel(hess_coord(d, X, Y), H))
