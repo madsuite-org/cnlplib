@@ -6,8 +6,10 @@ using PrecompileTools: @setup_workload, @compile_workload
 
 @setup_workload begin
     @compile_workload begin
-        madnlp(CNLPLib._toy_model(); print_level = MadNLP.ERROR)
-        madnlp(CNLPLib._toy_problem(); print_level = MadNLP.ERROR)
+        for fixed in (false, true)
+            madnlp(CNLPLib._toy_model(; fixed); print_level = MadNLP.ERROR)
+            madnlp(CNLPLib._toy_problem(; fixed); print_level = MadNLP.ERROR)
+        end
     end
 end
 

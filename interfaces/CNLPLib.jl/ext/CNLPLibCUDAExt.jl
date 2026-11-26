@@ -62,8 +62,8 @@ _d_cons(::Int64, x::Ptr{Cdouble}, c::Ptr{Cdouble}) = _put(c, [sum(Array(_dw(x, 2
 _d_jac(::Int64, ::Ptr{Cdouble}, v::Ptr{Cdouble}) = _put(v, [1.0, 1.0])
 _d_hess(::Int64, ::Ptr{Cdouble}, ::Ptr{Cdouble}, w::Cdouble, v::Ptr{Cdouble}) = _put(v, [2w, 2w])
 
-function _toy_device_model()
-    m = CNLPLib._toy_model()
+function _toy_device_model(; fixed::Bool = false)
+    m = CNLPLib._toy_model(; fixed)
     hm = m.meta
     meta = NLPModelMeta(
         hm.nvar; ncon = hm.ncon, nnzj = hm.nnzj, nnzh = hm.nnzh,

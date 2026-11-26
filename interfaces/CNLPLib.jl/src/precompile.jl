@@ -4,6 +4,9 @@
 # cuMadNLP) compile what a first load, evaluation and solve would.
 #
 #   min (x1 - 1)^2 + (x2 - 2)^2   s.t.   x1 + x2 = 1,   0 <= x <= 5
+#
+# and, with `fixed = true`, the same with x2 fixed at 0.5 and 1 <= x1 + x2 <= 2: MadNLP builds
+# a different solver for a model with fixed variables, so both are compiled.
 
 _w(p, n) = unsafe_wrap(Array, p, n)
 _toy_obj(::Int64, x::Ptr{Cdouble}, f::Ptr{Cdouble}) =
@@ -15,13 +18,16 @@ _toy_jac(::Int64, ::Ptr{Cdouble}, v::Ptr{Cdouble}) = (fill!(_w(v, 2), 1.0); Int6
 _toy_hess(::Int64, ::Ptr{Cdouble}, ::Ptr{Cdouble}, w::Cdouble, v::Ptr{Cdouble}) = (fill!(_w(v, 2), 2w); Int64(0))
 
 """
-    _toy_model() -> CNLPModel{Vector{Float64}}
+    _toy_model(; fixed = false) -> CNLPModel{Vector{Float64}}
 
 The precompilation model: a `CNLPModel` over Julia callbacks, valid in this process only.
 """
-function _toy_model()
-    meta = NLPModelMeta(2; ncon = 1, nnzj = 2, nnzh = 2, x0 = [0.5, 0.5], lvar = zeros(2),
-                        uvar = fill(5.0, 2), lcon = [1.0], ucon = [1.0], name = "toy")
+_toy_bounds(fixed) = fixed ? ([0.0, 0.5], [5.0, 0.5], [1.0], [2.0]) : (zeros(2), fill(5.0, 2), [1.0], [1.0])
+
+function _toy_model(; fixed::Bool = false)
+    lv, uv, lc, uc = _toy_bounds(fixed)
+    meta = NLPModelMeta(2; ncon = 1, nnzj = 2, nnzh = 2, x0 = [0.5, 0.5], lvar = lv,
+                        uvar = uv, lcon = lc, ucon = uc, name = "toy")
     return CNLPModel(
         meta, Counters(), CLib("", C_NULL, String[]), Int64(1),
         @cfunction(_toy_obj, Int64, (Int64, Ptr{Cdouble}, Ptr{Cdouble})),
@@ -43,15 +49,15 @@ _tp_js(::Ptr{Cvoid}, r::Ptr{Int64}, c::Ptr{Int64}) = (_w(r, 2) .= (1, 1); _w(c, 
 _tp_jac(::Ptr{Cvoid}, x::Ptr{Cdouble}, v::Ptr{Cdouble}) = _toy_jac(Int64(1), x, v)
 _tp_hs(::Ptr{Cvoid}, r::Ptr{Int64}, c::Ptr{Int64}) = (_w(r, 2) .= (1, 2); _w(c, 2) .= (1, 2); Int64(0))
 _tp_hess(::Ptr{Cvoid}, x::Ptr{Cdouble}, y::Ptr{Cdouble}, w::Cdouble, v::Ptr{Cdouble}) = _toy_hess(Int64(1), x, y, w, v)
-const _TOY_DATA = ([0.5, 0.5], zeros(2), fill(5.0, 2), [1.0], [1.0])
+const _TOY_DATA = Dict(f => ([0.5, 0.5], _toy_bounds(f)...) for f in (false, true))
 
 """
-    _toy_problem() -> ProblemModel{Vector{Float64}}
+    _toy_problem(; fixed = false) -> ProblemModel{Vector{Float64}}
 
 The precompilation model as a cnlp solver receives it.
 """
-function _toy_problem()
-    x0, lv, uv, lc, uc = _TOY_DATA
+function _toy_problem(; fixed::Bool = false)
+    x0, lv, uv, lc, uc = _TOY_DATA[fixed]
     p = CNLPProblem(C_NULL, 2, 1, 2, 2, 1, pointer(x0), pointer(lv), pointer(uv), pointer(lc), pointer(uc),
         C_NULL, C_NULL, C_NULL,
         @cfunction(_tp_obj, Int64, (Ptr{Cvoid}, Ptr{Cdouble}, Ptr{Cdouble})),

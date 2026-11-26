@@ -11,7 +11,9 @@ using PrecompileTools: @setup_workload, @compile_workload
     cx = Base.get_extension(CNLPLib, :CNLPLibCUDAExt)
     if cx !== nothing && CUDACore.functional()
         @compile_workload begin
-            cuMadNLP.madnlp(cx._toy_device_model(); print_level = cuMadNLP.MadCore.ERROR)
+            for fixed in (false, true)
+                cuMadNLP.madnlp(cx._toy_device_model(; fixed); print_level = cuMadNLP.MadCore.ERROR)
+            end
         end
     end
 end
