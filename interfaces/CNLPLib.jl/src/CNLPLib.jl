@@ -1,44 +1,25 @@
 """
     CNLPLib
 
-Consume an NLP exposed by a shared library through a plain C interface as an
-`NLPModels.AbstractNLPModel`, so any NLPModels-compatible solver (MadNLP,
-Ipopt, ...) can solve it. The main producer of such libraries is ExaModels'
-tape recorder (`compile_library`), but any
-library implementing the ABI below works, in any language.
-
-Implements cnlp ABI 0.2 (normative spec: `cnlp.h` at
-https://cnlplib.madsuite.org).
+A cnlp library (cnlp ABI 0.2, `cnlp.h`) as an `NLPModels.AbstractNLPModel`, for any
+NLPModels solver (MadNLP, Ipopt, ...), and the Julia side of the solver interface
+(`cnlp_solver.h`).
 
 A model is a `CNLPModel{VT}`: `VT = Vector{Float64}` evaluates through the library's
-host callbacks; with `device = :cuda` (CUDA extension) `VT` is a `CuVector` and the
-same instance evaluates through the device tier (`P_*_d`) on device pointers. Any
-number of instances may coexist per library, and a library may carry several models,
-one prefix each: `CNLPModel("@grid", :acopf, ...)`.
-
-# The libblastrampoline seam
-
-A `juliac`-compiled library carries its own (privatized) Julia runtime, but
-libblastrampoline is resolved once per process by soname, so it is *shared*
-with the host. The library's runtime initializes lazily on its first call and
-re-forwards the shared trampoline to its own BLAS, silently clearing the
-host's forwarding (symptom: `Error: no BLAS/LAPACK library loaded for
-dgemm_()` and solvers degrading to garbage). [`load`](@ref) snapshots the
-host's BLAS configuration before `dlopen`, and [`CNLPModel`](@ref) restores it
-after the library's first call; [`restore_blas!`](@ref) can be called again at
-any time.
-
-# Usage
+host callbacks; with `device = :cuda` (CUDA extension) `VT` is a `CuVector` and the same
+instance evaluates through the device tier. A library may carry several models, one
+symbol prefix each (`CNLPModel("@grid", :acopf, ...)`), and any number of instances.
 
 ```julia
 using CNLPLib, MadNLP
-lib = CNLPLib.load("librecorder.so")
-m = CNLPModel(lib, 1000; prefix = "rec")   # rec_new(1000) → id, fixes BLAS
+m = CNLPModel("@lv", :wood, 1000)   # installed from the registry on first use
 res = madnlp(m)
 ```
 
-Instantiation arguments are positional, one per schema field — the same
-spelling `ExaModel(core, arg1, arg2, ...)` uses on the producer side.
+A library carrying its own Julia runtime re-forwards the process's libblastrampoline on
+its first call, clearing the host's BLAS. [`load`](@ref) snapshots the host's BLAS
+configuration and [`CNLPModel`](@ref) restores it after the first call;
+[`restore_blas!`](@ref) does so again at any time.
 """
 module CNLPLib
 
@@ -89,8 +70,7 @@ end
 
 function _paths()
     if isempty(_PATHS)
-        # CNLPMODELS_PATH: the name before the package was renamed
-        env = get(ENV, "CNLPLIB_PATH", get(ENV, "CNLPMODELS_PATH", ""))
+        env = get(ENV, "CNLPLIB_PATH", "")
         isempty(env) || append!(_PATHS, split(env, ":"))
     end
     return _PATHS
@@ -99,12 +79,11 @@ end
 """
     lib(name::AbstractString) -> CLib
 
-Resolve `lib<name>.<dlext>` against the search path ([`set_path!`](@ref) /
-`CNLPLIB_PATH`) — also accepting `<dir>/lib/lib<name>.<dlext>`, the layout
-`compile_library` produces — then among the libraries the `cnlp` command installed
-(`\$CNLPLIB_HOME/lib`, by default `~/.cnlplib/lib`), and otherwise in the cnlplib registry,
-installed there on first use ([`install`](@ref)); load it, and cache the handle by name.
-`name@nightly` takes the registry's nightly build.
+The library `name`, loaded and cached by name: `lib<name>.<dlext>` on the search path
+([`set_path!`](@ref) / `CNLPLIB_PATH`; also under `<dir>/<name>/lib/` and `<dir>/lib/`),
+else among the libraries the `cnlp` command installed (`\$CNLPLIB_HOME/lib`), else
+installed there now from the registry ([`install`](@ref)). `name@nightly` takes the
+registry's nightly build.
 """
 function lib(name::AbstractString)
     get!(_LIBS, String(name)) do
@@ -115,8 +94,6 @@ function lib(name::AbstractString)
                 isfile(cand) && return load(cand)
             end
         end
-        # installed in $CNLPLIB_HOME (by the `cnlp` command, or by this package), else
-        # installed there now from the cnlplib registry
         return load(_registry_lib(name))
     end
 end
@@ -124,15 +101,7 @@ end
 """
     cnlp"name"
 
-The shortcut onto the library path: resolve `lib<name>.<dlext>` against
-[`set_path!`](@ref) / `CNLPLIB_PATH`, check that it exists and loads as a
-shared library, and return the (cached) handle — usable directly as the
-library argument of [`CNLPModel`](@ref):
-
-    m = CNLPModel(cnlp"acopf", bus, vmin, 100.0)
-
-Resolution and validation happen at run time (never at parse time), so the
-literal is safe inside precompiled code.
+[`lib`](@ref)`("name")`, resolved at run time: `CNLPModel(cnlp"acopf", bus, 100.0)`.
 """
 macro cnlp_str(name)
     return :(lib($name))
@@ -142,19 +111,12 @@ end
     load(path::AbstractString) -> CLib
 
 Snapshot the host's BLAS configuration, then `dlopen` the library with
-`RTLD_LOCAL | RTLD_DEEPBIND` (so the library prefers its own bundled
-dependencies and leaks no symbols into the host).
+`RTLD_LOCAL | RTLD_DEEPBIND`.
 
-An **unbundled** juliac library — one linked against the standard
-`libjulia` rather than carrying a privatized copy — cannot be loaded
-into a Julia process as-is: sharing the host's runtime, its first call
-aborts the whole process. On Linux and macOS, `load` detects this and
-gives the library a private copy of the *installed* runtime instead
-(patched in scratch, one per library file, cached), after which it
-behaves exactly like a bundled one. On Windows the unbundled form is
-refused with an explanation — compile with `bundle = true` there. The
-Julia running here must match the version the library was linked
-against.
+An unbundled juliac library (linked against the standard `libjulia`) would abort the
+process on its first call; on Linux and macOS `load` gives it a private copy of the
+installed Julia runtime instead (same Julia version required, see `private_runtime.jl`).
+Elsewhere the unbundled form is refused.
 """
 function load(path::AbstractString)
     blas_libs = [l.libname for l in BLAS.get_config().loaded_libs]
@@ -220,13 +182,9 @@ end
 """
     BlockRef
 
-A named block of a compiled model — a variable, constraint or parameter — with
-the slice of the solution (or of the parameter vector) it occupies.
-
-`offset` is 0-based, as the library reports it; `dims` is the block's shape, so
-a slice can be reshaped the way `ExaModels` does rather than handed back flat.
-`index` is the library's own numbering, which is how parameters are addressed
-for [`get_value`](@ref) / [`set_value!`](@ref).
+A named block of a model (a variable, constraint or parameter): `offset` (0-based) and
+`length` of its slice, `dims` its shape, `index` the library's own numbering, used by
+[`get_value`](@ref) / [`set_value!`](@ref).
 """
 struct BlockRef
     name::Symbol
@@ -244,23 +202,27 @@ Base.show(io::IO, b::BlockRef) = print(
     io, "BlockRef(:", b.name, ", ", b.kind, ", ", join(b.dims, "×"),
     " at ", b.offset, ")")
 
-# The library's published layout, or empty tuples when it publishes none.
-# Named blocks are an optional part of the ABI, like the schema and builder:
-# a hand-written C library that implements only the evaluators has nothing to
-# name, and is consumed exactly as before.
+# The ABI's string convention: call once with a null buffer to size, once to fill. `args`
+# are the leading Int64 arguments (none, an index, or an id and an index).
+function _copyout(fp::Ptr{Cvoid}, args::Vararg{Int64, N}) where {N}
+    f(buf, cap) = N == 0 ? ccall(fp, Int64, (Ptr{UInt8}, Int64), buf, cap) :
+                  N == 1 ? ccall(fp, Int64, (Int64, Ptr{UInt8}, Int64), args[1], buf, cap) :
+                  ccall(fp, Int64, (Int64, Int64, Ptr{UInt8}, Int64), args[1], args[2], buf, cap)
+    n = f(C_NULL, Int64(0))
+    n <= 0 && return ""
+    buf = Vector{UInt8}(undef, n)
+    f(buf, n)
+    return String(buf)
+end
+
+# The library's published layout, or empty tuples when it publishes none: named blocks are
+# an optional tier, and a failing layout query must not make the model unusable.
 function _read_layout(lib::CLib, prefix::AbstractString, id::Int64)
     nb = Libdl.dlsym(lib.handle, Symbol(prefix, "_nblocks"); throw_error = false)
     nb === nothing && return ((;), (;), (;))
     try
         return _read_layout_strict(lib, prefix, id, nb)
     catch err
-        # The layout is an OPTIONAL tier: a library whose block query fails
-        # is nonconformant, but that must not make the MODEL unusable — the
-        # evaluators are independent of it. Warn (once per construction, with
-        # the real error) and carry on with no named blocks. Observed live:
-        # a producer bug returned status 2 for six of seventeen models, and
-        # every one of them was thereby unconstructable rather than merely
-        # nameless.
         @warn "reading the named-block layout of `$prefix` failed; the model
                works, but get_vars/get_cons/get_pars will report no blocks" err
         return ((;), (;), (;))
@@ -277,10 +239,7 @@ function _read_layout_strict(lib::CLib, prefix::AbstractString, id::Int64, nb::P
         out = zeros(Int64, 4 + 8)
         _check(ccall(bp, Int64, (Int64, Int64, Ptr{Int64}), id, Int64(k), out),
                Symbol(prefix, "_block"))
-        need = ccall(np, Int64, (Int64, Int64, Ptr{UInt8}, Int64), id, Int64(k), C_NULL, Int64(0))
-        buf = Vector{UInt8}(undef, Int(need))
-        ccall(np, Int64, (Int64, Int64, Ptr{UInt8}, Int64), id, Int64(k), buf, need)
-        name = Symbol(String(buf))
+        name = Symbol(_copyout(np, id, Int64(k)))
         nd = Int(out[4])
         b = BlockRef(name,
                      out[1] == 0 ? :var : out[1] == 1 ? :con : :par,
@@ -301,32 +260,21 @@ end
 end
 
 """
-    schema_json(lib::CLib; prefix = "rec") -> String
-    schema_json(lib::CLib, model::Symbol) -> String
+    schema_json(lib::CLib; prefix = "rec") -> Union{String, Nothing}
+    schema_json(lib::CLib, model::Symbol)
 
-The library's data schema as published by `<prefix>_schema` (the schema/builder surface,
-structured libraries only): a JSON description of the fields, kinds
-(scalar/array/table) and column types. In a library carrying several models
-the schema is per model — name it as a symbol, exactly as in [`CNLPModel`](@ref).
+The model's data schema (`<prefix>_schema`, builder-tier libraries): JSON describing the
+fields, their kinds (scalar/array/table) and types. `nothing` for a model without one.
 """
 function schema_json(lib::CLib; prefix::AbstractString = "rec")
     fp = Libdl.dlsym(lib.handle, Symbol(prefix, "_schema"); throw_error = false)
-    # A model with no structured schema is not an error to ask about: it takes
-    # one value or none, and `argtype` says which. Returning `nothing` lets a
-    # caller ask about any model uniformly.
-    fp === nothing && return nothing
-    n = ccall(fp, Int64, (Ptr{UInt8}, Int64), C_NULL, Int64(0))
-    buf = Vector{UInt8}(undef, Int(n))
-    ccall(fp, Int64, (Ptr{UInt8}, Int64), buf, n)
-    return String(buf)
+    return fp === nothing ? nothing : _copyout(fp)
 end
 
 schema_json(lib::CLib, model::Symbol) = schema_json(lib; prefix = String(model))
 
-# Top-level field names from the schema JSON, in declaration order. The
-# schema is this package's own contract (see the README), so a structural
-# scan suffices: field objects sit at bracket depth 2 inside "fields"
-# (table columns at depth 4 are thereby excluded).
+# Top-level field names from the schema JSON, in declaration order: field objects sit at
+# bracket depth 2 inside "fields" (table columns, at depth 4, are excluded).
 function _schema_field_names(json::AbstractString)
     names = String[]
     r = findfirst("\"fields\"", json)
@@ -358,30 +306,12 @@ function _schema_field_names(json::AbstractString)
 end
 
 # ── Instantiation: positional arguments → model id ───────────────────────────
-#
-# Arguments are positional — one value per schema field, in the order the
-# library publishes them. That is deliberately the same convention the producer
-# side uses: an `ExaCore` built against placeholders is instantiated as
-# `ExaModel(core, arg1, arg2, ...)` and compiled as
-# `compile_library(out, core, arg1, ...)`, so a compiled model is consumed the
-# way it was written. The schema a compiled recipe publishes names its fields
-# `arg1`, `arg2`, ... for exactly that reason.
-#
-# A field's value is a scalar, an array, or a table (a vector of named tuples,
-# sent columnar) — the same grammar the producer derives its schema from.
-#
-# A lone integer takes the one-knob `<prefix>_new(n)` when the library exports
-# it, and falls through to the builder otherwise. The two surfaces are disjoint
-# in practice: `compile_library` emits `P_new` and no builder precisely when the
-# schema is a single integer scalar.
+# One value per schema field, in the library's order: a scalar, an array, or a table (a
+# vector of named tuples, sent column by column). A lone string goes to `<prefix>_new_str`,
+# a lone integer to `<prefix>_new` when the library exports it, no arguments to
+# `<prefix>_new(0)` when `<prefix>_nargs()` is 0; everything else goes through the builder.
 
 function _instantiate(lib::CLib, prefix::AbstractString, args::Tuple)
-    # A lone STRING argument goes to `<prefix>_new_str` — the entry point for
-    # models whose one argument is a string (a case-file path, say). There is
-    # no ambiguity with model SELECTION: by the time `_instantiate` runs, a
-    # leading selector string has already been consumed, so a string here is
-    # an argument. `argtype` is the witness a caller consults; the symbol is
-    # the witness this routing probes.
     if length(args) == 1 && args[1] isa AbstractString
         p = Libdl.dlsym(lib.handle, Symbol(prefix, "_new_str"); throw_error = false)
         p === nothing && error(
@@ -400,12 +330,6 @@ function _instantiate(lib::CLib, prefix::AbstractString, args::Tuple)
             return id
         end
     end
-    # A FIXED model — a library whose `<prefix>_nargs()` reports 0 — consumes
-    # no instantiation data: `<prefix>_new` keeps its one-integer C signature
-    # but ignores the value, so no arguments at all is the natural call. A
-    # library that does not declare its arity keeps the old behaviour and
-    # falls through to the builder surface (where a schema with no fields is
-    # the other legitimate "no instance data" case).
     if isempty(args)
         q = Libdl.dlsym(lib.handle, Symbol(prefix, "_nargs"); throw_error = false)
         if q !== nothing && ccall(q, Int64, ()) == 0
@@ -418,10 +342,8 @@ function _instantiate(lib::CLib, prefix::AbstractString, args::Tuple)
     return _fill_data(lib, prefix, _bind(lib, prefix, args))
 end
 
-# Positional arguments against the schema's field order. No arguments at all is
-# the "no instance data" case, and is checked the same way — a schema declaring
-# fields says so here, rather than the library reporting itself incomplete
-# several calls later.
+# Positional arguments against the schema's field order, checked for arity here rather than
+# by the library several calls later.
 function _bind(lib::CLib, prefix::AbstractString, args::Tuple)
     Libdl.dlsym(lib.handle, Symbol(prefix, "_data_begin"); throw_error = false) === nothing &&
         error("this library has no builder surface: it instantiates from a " *
@@ -484,25 +406,15 @@ function _fill_data(lib::CLib, prefix::AbstractString, data::NamedTuple)
 end
 
 """
-    CNLPModel(lib::CLib, arg1, arg2, ...; prefix = "rec", name = basename(lib.path))
+    CNLPModel(lib::CLib, arg1, arg2, ...; prefix = "rec", name = basename(lib.path),
+              device = :cpu, input = nothing)
 
-Create a model instance from `lib` and wrap it as an `AbstractNLPModel`.
-
-The arguments are the values the model is instantiated with — one per field of
-the library's schema, positionally, in the order the library publishes them.
-This is the same spelling the producer side uses (`ExaModel(core, arg1, ...)`,
-`compile_library(out, core, arg1, ...)`), so a compiled model is consumed the
-way it was written.
-
-Each value is a **number**, a **numeric vector**, or a **table** (a vector of
-named tuples, sent to the builder column by column and validated against
-the library's schema). A lone integer uses `<prefix>_new(n)` when the library
-exports it and the builder otherwise; with no arguments at all the model is
-built from no instance data, which is valid when the schema declares no fields.
-
-Any number of instances may coexist per library. The first library call lazily
-finishes its runtime initialization, after which the host's BLAS forwarding is
-restored — see [`restore_blas!`](@ref).
+A model instance of `lib`, as an `AbstractNLPModel`. The arguments instantiate it: one
+value per field of the model's schema, in the library's order, each a number, a numeric
+vector, or a table (a vector of named tuples). A lone integer or string goes to the
+model's own entry point when it has one; no arguments instantiate a model that takes none.
+`input = :reader => path` instantiates through one of the model's instance readers
+instead ([`readers`](@ref)). `device = :cuda` evaluates on the GPU (CUDA extension).
 
     m = CNLPModel(lib, 1000; prefix = "rosen")             # rosen_new(1000)
     m = CNLPModel(lib, [(i = 1, pd = 0.4)], [0.9], 100.0)  # table, array, scalar
@@ -518,16 +430,13 @@ function CNLPModel(
     sym(s) = Symbol(prefix, "_", s)
     fp(s) = Libdl.dlsym(lib.handle, sym(s))
 
-    # `input = :name => path`: instantiate through one of the model's own
-    # instance readers (the readers tier) instead of its entry point.
     id = if input === nothing
         _instantiate(lib, prefix, args)
     else
         isempty(args) || throw(ArgumentError("give either instantiation arguments or `input`, not both"))
         _instantiate_reader(lib, prefix, Symbol(first(input)), String(last(input)))
     end
-    # The library's runtime is fully initialized by now: repair whatever its
-    # lazy initialization did to the shared trampoline.
+    # the library's lazy runtime initialization has happened by now
     restore_blas!(lib)
 
     nvar = Int(ccall(fp(:nvar), Int64, (Int64,), id))
@@ -562,16 +471,10 @@ function CNLPModel(
         Vector{Float64}(undef, nnzj), Vector{Float64}(undef, nnzh), zeros(ncon),
         String(prefix), vars, cons, pars,
     )
-    # Restore once more on the way out: the structure calls above are the
-    # first entries into THIS model's generated code, and in a multi-model
-    # library a later model's first calls can lazily clobber the trampoline
-    # again after the post-instantiation restore. Observed live: model two of
-    # an OPF library printing `no BLAS/LAPACK library loaded for dcopy_()`
-    # at solve time until an explicit restore.
+    # once more: in a multi-model library, the structure calls above are the first entries
+    # into this model's code and can clobber the trampoline again
     restore_blas!(lib)
     device === :cpu && return m
-    # The device tier (`P_device`, `P_*_d`): a model on the same instance whose
-    # metadata and buffers live on the device. Provided by a package extension.
     hasmethod(_device_model, Tuple{Val{device}, typeof(m)}) || throw(ArgumentError(
         "`device = :$device` needs its extension loaded (for :cuda, `using CUDA` or `using CUDACore`)"))
     return _device_model(Val(device), m)
@@ -595,24 +498,12 @@ end
 """
     CNLPModel(spec::AbstractString, arg1, arg2, ...; kwargs...)
 
-String-based construction:
+`"@name"` is a library name, resolved by [`lib`](@ref); any other string is a path to the
+shared library or to a bundle directory containing `lib/lib<name>.<ext>`. The prefix
+defaults to the name (`.../librosen.so` and `/path/to/rosen/` give `"rosen"`).
 
-  - `"@opf"` resolves the **name** `opf` via [`lib`](@ref) against
-    [`set_path!`](@ref) / `CNLPLIB_PATH` (`\$dir/libopf.so`, or the
-    bundled layouts `\$dir/opf/lib/libopf.so` and `\$dir/lib/libopf.so`);
-    the prefix defaults to the name;
-  - any other string is a filesystem **path**, relative to the current
-    directory or absolute, exactly as written — either the shared library
-    itself, or a bundle directory `compile_library` produced, in which case
-    the library is found inside it. The prefix defaults to the resolved
-    name stripped of `lib` and the extension (`.../librosen.so` → `"rosen"`,
-    `/path/to/opf/` → `"opf"`).
-
-Override either default with `prefix=`.
-
-    m = CNLPModel("@acopf", bus, vmin, 100.0)     # search path
-    m = CNLPModel("rosen", 1000)                  # ./rosen (file or bundle dir)
-    m = CNLPModel("/opt/models/rosen", 1000)      # full path
+    m = CNLPModel("@acopf", bus, vmin, 100.0)     # search path or registry
+    m = CNLPModel("/opt/models/rosen", 1000)      # a path
 """
 function CNLPModel(
     spec::AbstractString, args...;
@@ -624,24 +515,12 @@ end
 """
     CNLPModel(lib, model::Symbol, arg1, arg2, ...; name = String(model))
 
-Select a model **by name** in a library carrying several.
-
-One shared library may export any number of models, each under its own symbol
-prefix, each with its own schema and its own instances — `:acopf` binds
-`acopf_new`, `acopf_obj`, `acopf_meta`, ... So the symbol *is* the prefix, and
-naming it is the whole of model selection:
+A model of a library carrying several, by name: the symbol is the prefix its functions are
+exported under (`:acopf` binds `acopf_new`, `acopf_obj`, ...). `lib` is a `CLib`, a
+`cnlp"..."` literal, an `"@name"`, or a path.
 
     m = CNLPModel("@grid", :acopf, bus, 100.0)   # acopf_* inside libgrid.so
     d = CNLPModel("@grid", :dcopf, bus)          # dcopf_* in the same library
-
-`lib` is anything the single-model constructors accept — a `CLib`, a `cnlp"..."`
-literal, an `"@name"`, or a path. Models in one library share the library's
-address space and, for a library carrying a language runtime, its single runtime
-copy; they are otherwise independent, and instances of different models coexist
-exactly as instances of one model do.
-
-Omitting the symbol keeps the single-model spelling, where the prefix falls back
-to the library name — so a one-model library is unaffected.
 """
 function CNLPModel(
     lib::CLib, model::Symbol, args...; name::AbstractString = String(model), kwargs...,
@@ -652,12 +531,7 @@ function CNLPModel(
     return CNLPModel(lib, args...; prefix = String(model), name = name, kwargs...)
 end
 
-# A name this library does not carry must be reported HERE. `_nvar` is the
-# witness because the ABI requires it of every model whichever way the model is
-# instantiated — unlike `_new` (absent from builder-only models) or
-# `_data_begin` (absent from one-knob ones). Without this check a mistyped name
-# surfaces several calls later as "this library has no builder surface", which
-# describes a single-model library rather than a name that is not in this one.
+# `_nvar` is the witness: the ABI requires it of every model however it is instantiated.
 function _require_model(lib::CLib, model::Symbol)
     Libdl.dlsym(lib.handle, Symbol(model, "_nvar"); throw_error = false) === nothing &&
         error("library $(lib.path) carries no model named `$model` " *
@@ -669,27 +543,20 @@ function CNLPModel(spec::AbstractString, model::Symbol, args...; kwargs...)
     return CNLPModel(_resolve_spec(spec), model, args...; kwargs...)
 end
 
-# `@name` resolves on the search path; any other string is a filesystem path,
-# relative to the current directory or absolute, exactly as written.
+# `@name` is a library name; any other string is a filesystem path, as written.
 _is_name(spec::AbstractString) = startswith(spec, "@")
 
 _default_prefix(spec::AbstractString) =
     _is_name(spec) ? String(first(split(spec[2:end], '@'))) : _prefix_from_path(spec)
 
-# `librosen.so` → `rosen`; a bundle directory or a file not following the
-# `lib<name>` convention keeps its stem, and `prefix=` remains the override
-# for libraries whose symbols are named independently of the file.
+# `librosen.so` → `rosen`; a bundle directory or another file name keeps its stem.
 function _prefix_from_path(path::AbstractString)
     base = first(splitext(basename(rstrip(path, '/'))))
     return startswith(base, "lib") && length(base) > 3 ? base[4:end] : base
 end
 
-# A path names a shared library directly, or a bundle DIRECTORY — the layout
-# `compile_library` produces — in which case the library is found inside it.
-# Returned ABSOLUTE: `dlopen` treats a slash-free relative like `qp.so` as a
-# soname to search the system path for, not as a file in the current
-# directory — it resolved locally only by environmental accident and failed
-# in CI.
+# A shared library, or a bundle directory with the library inside. Absolute, since `dlopen`
+# treats a slash-free relative path like `qp.so` as a soname to search for.
 function _resolve_path(spec::AbstractString)
     isfile(spec) && return abspath(spec)
     if isdir(spec)
@@ -702,8 +569,7 @@ function _resolve_path(spec::AbstractString)
     error("no shared library at $spec")
 end
 
-# Cached like name-resolution: absolute-path keys cannot collide with bare
-# names, so the one registry serves both.
+# Cached with the name-resolved libraries: absolute paths cannot collide with names.
 _resolve_spec(spec::AbstractString) =
     _is_name(spec) ? lib(spec[2:end]) :
     get!(() -> load(_resolve_path(spec)), _LIBS, abspath(spec))
@@ -711,19 +577,11 @@ _resolve_spec(spec::AbstractString) =
 """
     argtype(lib, model) -> String
 
-What a model instantiates **from**: the types its entry point takes, in order,
-each optionally followed by `|` and a description.
-
-This is the question a consumer holding only a library cannot otherwise answer.
-`""` is a model that takes nothing, `"int|size"` one that takes a size,
-`"string|…"` one whose entry point takes a string, and a longer list is a
-structured model taking one value per field:
+What the model instantiates from: the types its entry point takes, in order, each
+optionally followed by `|` and a description; `""` for a model that takes nothing or a
+library that publishes no signature.
 
     argtype(lib, :acopf)   # "int|arg1,Vector{f64}|v0,Table{i::int pd::f64}|bus"
-
-Every model answers, including those with no builder schema — which is why
-this exists rather than reading the schema, which only structured models have.
-A library that publishes no signature returns `""`.
 """
 argtype(lib::CLib, model::Union{Symbol, AbstractString}) = _argtype(lib, String(model))
 argtype(spec::AbstractString, model::Union{Symbol, AbstractString}) =
@@ -731,29 +589,14 @@ argtype(spec::AbstractString, model::Union{Symbol, AbstractString}) =
 
 function _argtype(lib::CLib, prefix::AbstractString)
     fp = Libdl.dlsym(lib.handle, Symbol(prefix, "_argtype"); throw_error = false)
-    fp === nothing && return ""
-    n = ccall(fp, Int64, (Ptr{UInt8}, Int64), C_NULL, Int64(0))
-    n <= 0 && return ""
-    buf = Vector{UInt8}(undef, Int(n))
-    ccall(fp, Int64, (Ptr{UInt8}, Int64), buf, n)
-    return String(buf)
+    return fp === nothing ? "" : _copyout(fp)
 end
 
 """
     available_models(lib) -> Vector{Symbol}
 
-The models a library carries, by name.
-
-Every other entry point needs a prefix to start from; this is the one question
-a caller can ask having only a path. Pair it with [`CNLPModel`](@ref):
-
-    for name in available_models("@grid")
-        m = CNLPModel("@grid", name, data)
-    end
-
-A library that does not publish a catalogue — a hand-written C library, or one
-compiled before libraries said what they carried — returns an empty vector, and
-selecting a model by name still works if you know the name.
+The models the library carries, by name (`cnlp_nmodels`, `cnlp_model_name`); empty for a
+library that publishes no catalogue.
 """
 available_models(lib::CLib) = _catalogue(lib)
 available_models(spec::AbstractString) = _catalogue(_resolve_spec(spec))
@@ -764,14 +607,7 @@ function _catalogue(lib::CLib)
     count = ccall(n, Int64, ())
     count <= 0 && return Symbol[]
     np = Libdl.dlsym(lib.handle, :cnlp_model_name)
-    out = Vector{Symbol}(undef, Int(count))
-    for k in 0:(Int(count) - 1)
-        need = ccall(np, Int64, (Int64, Ptr{UInt8}, Int64), Int64(k), C_NULL, Int64(0))
-        buf = Vector{UInt8}(undef, Int(need))
-        ccall(np, Int64, (Int64, Ptr{UInt8}, Int64), Int64(k), buf, need)
-        out[k + 1] = Symbol(String(buf))
-    end
-    return out
+    return [Symbol(_copyout(np, Int64(k))) for k in 0:(Int(count) - 1)]
 end
 
 # ── Named blocks ─────────────────────────────────────────────────────────────
@@ -781,25 +617,16 @@ end
     get_cons(model[, name])
     get_pars(model[, name])
 
-The model's **named** blocks of that kind, as a `NamedTuple` — or one of them
-by name.
-
-A compiled library publishes the names its model was written with, so a caller
-who never sees the Julia source can still address a slice of the solution by
-name. Pair them with [`solution`](@ref), [`multipliers`](@ref),
-[`multipliers_L`](@ref) / [`multipliers_U`](@ref), and [`get_value`](@ref) /
-[`set_value!`](@ref) for parameters — the same spellings `ExaModels` uses for a
-model built in Julia.
-
-Named blocks are optional in the ABI: a library that publishes none reports
-empty tuples, and everything else about it still works.
+The model's named blocks of that kind, as a `NamedTuple` of [`BlockRef`](@ref)s, or one of
+them by name; empty for a library that publishes none. Use them with [`solution`](@ref),
+[`multipliers`](@ref), [`multipliers_L`](@ref) / [`multipliers_U`](@ref), and
+[`get_value`](@ref) / [`set_value!`](@ref) for parameters.
 
     m = CNLPModel("@grid", :acopf, bus)
     keys(get_vars(m))                 # (:pg, :qg, :vm, :va)
     solution(result, get_vars(m, :pg))
 
-Modelling packages export accessors with these names too (ExaModels itself
-does); with both loaded, Julia makes the bare name ambiguous — qualify as
+ExaModels exports accessors with these names too; with both loaded, qualify as
 `CNLPLib.get_vars`.
 """
 get_vars(m::CNLPModel) = getfield(m, :vars)
@@ -816,9 +643,7 @@ get_cons(m::CNLPModel, name::Symbol) = _named_block(m, :con, name)
 @doc (@doc get_vars)
 get_pars(m::CNLPModel, name::Symbol) = _named_block(m, :par, name)
 
-# The two ways of being wrong are separated here for the same reason as in
-# ExaModels: named blocks share one namespace, so asking for a variable that is
-# really a parameter is at least as likely as a typo, and wants a different fix.
+# A name of another kind names the accessor that would work; a typo lists what exists.
 function _named_block(m::CNLPModel, kind::Symbol, name::Symbol)
     nt = kind === :var ? get_vars(m) : kind === :con ? get_cons(m) : get_pars(m)
     haskey(nt, name) && return nt[name]
@@ -836,64 +661,41 @@ function _named_block(m::CNLPModel, kind::Symbol, name::Symbol)
          " (none — this library publishes no named blocks)" : "")))
 end
 
+# The block's slice of a vector, in the block's shape.
+_block(v::AbstractVector, b::BlockRef) =
+    reshape(view(v, (b.offset + 1):(b.offset + b.length)), b.dims...)
+
 """
     solution(result, block)
-
-The part of `result.solution` belonging to variable `block`, reshaped to the
-block's own dimensions.
-"""
-solution(result, b::BlockRef) =
-    reshape(view(result.solution, (b.offset + 1):(b.offset + b.length)), b.dims...)
-
-# The same extraction from a bare vector — for callers holding `res.solution`
-# rather than the result object; without this method that spelling failed
-# with a `FieldError` pointing at Array, which explains nothing.
-solution(x::AbstractVector, b::BlockRef) =
-    reshape(view(x, (b.offset + 1):(b.offset + b.length)), b.dims...)
-
-"""
     multipliers(result, block)
-
-The dual variables for constraint `block`.
-"""
-multipliers(result, b::BlockRef) =
-    reshape(view(result.multipliers, (b.offset + 1):(b.offset + b.length)), b.dims...)
-
-@doc (@doc solution)
-multipliers(y::AbstractVector, b::BlockRef) =
-    reshape(view(y, (b.offset + 1):(b.offset + b.length)), b.dims...)
-
-"""
     multipliers_L(result, block)
     multipliers_U(result, block)
 
-The lower- and upper-bound dual variables for variable `block`.
+The part of `result.solution` belonging to variable `block`, the dual variables for
+constraint `block`, and the lower- and upper-bound duals for variable `block`, each
+reshaped to the block's dimensions. `result` is a solver result, or the bare vector.
 """
-multipliers_L(result, b::BlockRef) =
-    reshape(view(result.multipliers_L, (b.offset + 1):(b.offset + b.length)), b.dims...)
+solution(result, b::BlockRef) = _block(result.solution, b)
+solution(x::AbstractVector, b::BlockRef) = _block(x, b)
 
 @doc (@doc solution)
-multipliers_L(z::AbstractVector, b::BlockRef) =
-    reshape(view(z, (b.offset + 1):(b.offset + b.length)), b.dims...)
-
-@doc (@doc multipliers_L)
-multipliers_U(result, b::BlockRef) =
-    reshape(view(result.multipliers_U, (b.offset + 1):(b.offset + b.length)), b.dims...)
+multipliers(result, b::BlockRef) = _block(result.multipliers, b)
+multipliers(y::AbstractVector, b::BlockRef) = _block(y, b)
 
 @doc (@doc solution)
-multipliers_U(z::AbstractVector, b::BlockRef) =
-    reshape(view(z, (b.offset + 1):(b.offset + b.length)), b.dims...)
+multipliers_L(result, b::BlockRef) = _block(result.multipliers_L, b)
+multipliers_L(z::AbstractVector, b::BlockRef) = _block(z, b)
+
+@doc (@doc solution)
+multipliers_U(result, b::BlockRef) = _block(result.multipliers_U, b)
+multipliers_U(z::AbstractVector, b::BlockRef) = _block(z, b)
 
 """
     get_value(model, param)
     set_value!(model, param, values)
 
-Read or update a parameter block's values. Parameters are model state: a write
-takes effect for every later evaluation of this instance, and other instances
-of the same model keep their own.
-
-Unlike `ExaModels.get_value`, this returns a copy rather than a view — the
-values live in the library's address space, not the caller's.
+Read (a copy of) or update a parameter block's values, per instance: a write takes effect
+for every later evaluation of this instance.
 """
 function get_value(m::CNLPModel, b::BlockRef)
     b.kind === :par || throw(ArgumentError("`$(b.name)` is a $(b.kind), not a parameter"))
@@ -1051,10 +853,12 @@ NLPModels.hprod!(m::CNLPModel, x::AbstractVector{Float64}, v::AbstractVector{Flo
                  Hv::AbstractVector{Float64}; obj_weight::Real = 1.0) =
     NLPModels.hprod!(m, x, m.zeroy, v, Hv; obj_weight)
 
-# ── solution writers ─────────────────────────────────────────────────────────────
-# A library may carry writers for its models (P_nwriters, P_writer_name,
-# P_write_<name>): code that turns a solution into the model's own file format,
-# such as a solved MATPOWER case. They run on the host.
+# ── solution writers (P_nwriters, P_writer_name, P_write_<name>): the model's own file
+# formats, run on the host ──────────────────────────────────────────────────────────
+
+# Arrays as host vectors (a device model's arrays are copied over).
+_host(v::Vector{Float64}) = v
+_host(v::AbstractVector) = Vector{Float64}(Array(v))
 
 """
     writers(m) -> Vector{Symbol}
@@ -1065,27 +869,18 @@ function writers(m::CNLPModel)
     np = Libdl.dlsym(m.lib.handle, Symbol(m.prefix, "_nwriters"); throw_error = false)
     np === nothing && return Symbol[]
     fp = Libdl.dlsym(m.lib.handle, Symbol(m.prefix, "_writer_name"))
-    out = Symbol[]
-    for k in 0:(Int(ccall(np, Int64, ())) - 1)
-        n = ccall(fp, Int64, (Int64, Ptr{UInt8}, Int64), k, C_NULL, 0)
-        buf = Vector{UInt8}(undef, n)
-        ccall(fp, Int64, (Int64, Ptr{UInt8}, Int64), k, buf, n)
-        push!(out, Symbol(String(buf)))
-    end
-    return out
+    return [Symbol(_copyout(fp, Int64(k))) for k in 0:(Int(ccall(np, Int64, ())) - 1)]
 end
 
 """
     write_solution(m, writer, path, result)
     write_solution(m, writer, path, x, y, zl, zu; objective, status = "")
 
-Write a solution with one of the library's writers (see [`writers`](@ref)).
-`result` is a solver result with `solution`, `multipliers`, `multipliers_L`,
-`multipliers_U`, `objective` and `status` (MadNLP's, NLPModelsIpopt's), in the
-NLPModels sign convention, which is converted to the cnlp one for a maximizing model.
-The explicit form takes `y`, `zl`, `zu` already in the cnlp convention
-(σ∇f + Jᵀy − zL + zU = 0, cnlp-solution 2.1). Arrays on a device are copied to the
-host first.
+Write a solution with one of the library's writers ([`writers`](@ref)). `result` is a
+solver result (MadNLP's, NLPModelsIpopt's) with `solution`, `multipliers`, `multipliers_L`,
+`multipliers_U`, `objective` and `status`, in the NLPModels sign convention; the explicit
+form takes `y`, `zl`, `zu` already in the cnlp convention. Device arrays are copied to the
+host.
 """
 function write_solution(m::CNLPModel, writer::Symbol, path::AbstractString,
                         x::AbstractVector, y::AbstractVector, zl::AbstractVector, zu::AbstractVector;
@@ -1094,9 +889,8 @@ function write_solution(m::CNLPModel, writer::Symbol, path::AbstractString,
     @lencheck m.meta.nvar x zl zu
     @lencheck m.meta.ncon y
     fp = Libdl.dlsym(m.lib.handle, Symbol(m.prefix, "_write_", writer))
-    hx, hy, hl, hu = (Vector{Float64}(Array(v)) for v in (x, y, zl, zu))
     st = ccall(fp, Int64, (Int64, Cstring, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Cdouble, Cstring),
-               m.id, path, hx, hy, hl, hu, Cdouble(objective), status)
+               m.id, path, _host(x), _host(y), _host(zl), _host(zu), Cdouble(objective), status)
     st == 0 || error("writer `$writer` of `$(m.prefix)` could not write $path (status $st)")
     return path
 end
@@ -1108,16 +902,13 @@ function write_solution(m::CNLPModel, writer::Symbol, path::AbstractString, resu
 end
 
 # Multiplier signs. A cnlp solution satisfies σ∇f + Jᵀy − zL + zU = 0 (σ = −1 when the model
-# maximizes; cnlp-solution 2.1). NLPModels/SolverCore results (MadNLP, NLPModelsIpopt) satisfy
-# ∇f + Jᵀy − zL + zU = 0, so for a maximizing model all three are negated, each way.
+# maximizes; formats/solution.md); NLPModels results satisfy ∇f + Jᵀy − zL + zU = 0. For a
+# maximizing model all three are negated, which is its own inverse.
 _to_cnlp_signs(m::CNLPModel, y, zl, zu) =
     m.meta.minimize ? (y, zl, zu) : (-Array(y), -Array(zl), -Array(zu))
-_from_cnlp_signs(m::CNLPModel, y, zl, zu) = _to_cnlp_signs(m, y, zl, zu)
 
-# ── the standard solution format (cnlp-solution 0.2: formats/solution.md) ──────────
-# HDF5, written by the HDF5 extension (`using HDF5`): root attributes, the `/solution`
-# group (as ExaModelsIO stores a solution) and `/blocks/<kind>/<name>`. Other encodings
-# are a library's writers.
+# ── the standard solution format (cnlp-solution 0.2: formats/solution.md), HDF5, written
+# by the HDF5 extension ──────────────────────────────────────────────────────────────
 
 # Solver statuses (MadNLP, SolverCore) mapped to the solver-neutral ones.
 const _STATUS = Dict(
@@ -1140,11 +931,10 @@ end
 
 # The solution as plain host data, organized by the library's named blocks.
 function _solution_record(m::CNLPModel, result)
-    x = Vector{Float64}(Array(result.solution))
-    y, zl, zu = (Vector{Float64}(Array(v)) for v in
-                 _to_cnlp_signs(m, result.multipliers, result.multipliers_L, result.multipliers_U))
+    x = _host(result.solution)
+    y, zl, zu = map(_host, _to_cnlp_signs(m, result.multipliers, result.multipliers_L, result.multipliers_U))
     c = _host_cons(m, x)
-    sl(v, b) = reshape(v[(b.offset + 1):(b.offset + b.length)], b.dims...)
+    sl(v, b) = collect(_block(v, b))
     blocks = Tuple{String,String,Vector{Pair{String,Array{Float64}}}}[]
     for (name, b) in pairs(get_vars(m))
         push!(blocks, ("variables", String(name), ["value" => sl(x, b),
@@ -1154,7 +944,7 @@ function _solution_record(m::CNLPModel, result)
         push!(blocks, ("constraints", String(name), ["value" => sl(c, b), "multiplier" => sl(y, b)]))
     end
     for (name, b) in pairs(get_pars(m))
-        push!(blocks, ("parameters", String(name), ["value" => reshape(Vector{Float64}(get_value(m, b)), b.dims...)]))
+        push!(blocks, ("parameters", String(name), ["value" => get_value(m, b)]))
     end
     return (; library = basename(m.lib.path), model = m.prefix, nvar = m.meta.nvar, ncon = m.meta.ncon,
             minimize = m.meta.minimize, objective = Float64(result.objective),
@@ -1169,11 +959,8 @@ function _write_standard end
 function default_writer(m::CNLPModel)
     fp = Libdl.dlsym(m.lib.handle, Symbol(m.prefix, "_default_writer"); throw_error = false)
     fp === nothing && return nothing
-    n = ccall(fp, Int64, (Int64, Ptr{UInt8}, Int64), m.id, C_NULL, 0)
-    n <= 0 && return nothing
-    buf = Vector{UInt8}(undef, n)
-    ccall(fp, Int64, (Int64, Ptr{UInt8}, Int64), m.id, buf, n)
-    return Symbol(String(buf))
+    name = _copyout(fp, m.id)
+    return isempty(name) ? nothing : Symbol(name)
 end
 
 """
@@ -1191,27 +978,9 @@ function write_solution(m::CNLPModel, path::AbstractString, result; format::Unio
     return _write_standard(path, _solution_record(m, result))
 end
 
-# ── readers: the model's own input formats ──────────────────────────────────────
-# (cnlp.h, the readers tier). Kinds: :instance, :parameters, :start.
+# ── readers: the model's own input formats (the readers tier) ─────────────────────
 
 const _READER_KINDS = (:instance, :parameters, :start)
-
-# The ABI string convention (call once to size, once to fill), for the two
-# shapes readers use: (buf, cap) and (k, buf, cap).
-function _copyout(fp)
-    n = ccall(fp, Int64, (Ptr{UInt8}, Int64), C_NULL, 0)
-    n <= 0 && return ""
-    buf = Vector{UInt8}(undef, n)
-    ccall(fp, Int64, (Ptr{UInt8}, Int64), buf, n)
-    return String(buf)
-end
-function _copyout(fp, k::Int64)
-    n = ccall(fp, Int64, (Int64, Ptr{UInt8}, Int64), k, C_NULL, 0)
-    n <= 0 && return ""
-    buf = Vector{UInt8}(undef, n)
-    ccall(fp, Int64, (Int64, Ptr{UInt8}, Int64), k, buf, n)
-    return String(buf)
-end
 
 """
     readers(lib, model::Symbol) -> Vector{Pair{Symbol,Symbol}}
@@ -1273,7 +1042,7 @@ function read_start(m::CNLPModel, reader::Symbol, path::AbstractString)
     fp = Libdl.dlsym(m.lib.handle, Symbol(m.prefix, "_start_from_", reader))
     _check(ccall(fp, Int64, (Int64, Cstring, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}),
                  m.id, path, x0, y0, zl, zu), Symbol(m.prefix, "_start_from_", reader))
-    y0, zl, zu = _from_cnlp_signs(m, y0, zl, zu)
+    y0, zl, zu = _to_cnlp_signs(m, y0, zl, zu)   # its own inverse
     return (; x0, y0, zl, zu)
 end
 
@@ -1290,12 +1059,9 @@ function read_parameters!(m::CNLPModel, reader::Symbol, path::AbstractString)
     return m
 end
 
-
-# What a first use compiles (a traced load, construction and callbacks of a host model),
-# compiled here so it is in the package image. A statement naming something a dependency
-# no longer has is skipped.
-# The model API on the host storage type, compiled into the package image so the first
-# model of a session runs without compiling.
+# Compiled into the package image: the model API on the host storage type, and the traced
+# statements of a first load and construction (precompile_statements.jl; a statement naming
+# something a dependency no longer has is skipped).
 let M = CNLPModel{Vector{Float64}, Vector{Int}}, V = Vector{Float64}, W = NamedTuple{(:obj_weight,), Tuple{Float64}}
     precompile(CNLPModel, (CLib, Symbol, Int))
     precompile(CNLPModel, (CLib, Int))

@@ -63,7 +63,6 @@ def reg(tmp_path, monkeypatch):
     monkeypatch.setenv("CNLPLIB_DEVICE", "cpu")
     monkeypatch.setenv("CNLPLIB_HOME", str(home))
     monkeypatch.delenv("CNLPLIB_PATH", raising=False)
-    monkeypatch.delenv("CNLPMODELS_PATH", raising=False)
     monkeypatch.setenv("PATH", f"{ROOT / 'bin'}:{os.environ['PATH']}")
     cnlplib.set_path()
     yield home, index

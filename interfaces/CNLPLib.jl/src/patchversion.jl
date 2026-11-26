@@ -1,9 +1,7 @@
-# Vendored from JuliaC.jl (src/patchversion.jl, MIT) — rewrites ELF symbol
-# version strings in place, so a privatized runtime copy stops sharing its
+# Vendored from JuliaC.jl (src/patchversion.jl, MIT), without the copying variant: rewrites
+# ELF symbol version strings in place, so a privatized runtime copy stops sharing its
 # version namespace (`JL_LIBJULIA_x.y`) with the host's libjulia.
 module PatchVersion
-
-export patch_version, patch_version!
 
 import ObjectFile: ObjectFile, ELFHandle, StrTab, SectionRef, Sections, strtab_lookup,
     ELF, section_offset, section_size
@@ -135,13 +133,7 @@ function patch_version!(infile::AbstractString, oldver::Vector{UInt8}, newver::V
     return nothing
 end
 
-function patch_version(infile::AbstractString, oldver::Vector{UInt8}, newver::Vector{UInt8}, outfile::AbstractString; kwargs...)
-    cp(infile, outfile; follow_symlinks=true, force=true)
-    patch_version!(outfile, oldver, newver; kwargs...)
-end
-
 # Handle string versions
-patch_version(i, o, n, out; kwargs...) = patch_version(i, Vector{UInt8}(o), Vector{UInt8}(n), out; kwargs...)
 patch_version!(i, o, n; kwargs...) = patch_version!(i, Vector{UInt8}(o), Vector{UInt8}(n); kwargs...)
 
 end

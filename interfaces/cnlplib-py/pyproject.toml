@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "cnlplib"
 version = "0.1.0"
 license = {file = "LICENSE"}
-description = "Consume C-ABI NLP shared libraries (e.g. ExaModels-compiled) as numpy-backed models — no Julia required"
+description = "cnlp libraries (compiled nonlinear programs, cnlp.h) as numpy-backed models"
 requires-python = ">=3.10"
 dependencies = ["numpy"]
 

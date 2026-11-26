@@ -1,4 +1,4 @@
-"""Hermetic tests against the plain-C reference library (no Julia anywhere)."""
+"""Tests against the plain-C fixture, conformance/tinyqp.c."""
 import os
 import pathlib
 import shutil
@@ -96,7 +96,6 @@ def test_solve_with_cyipopt(m):
 
 
 def test_name_based_loading(lib, tmp_path):
-    import shutil
     shutil.copy(pathlib.Path(lib._name), tmp_path / "libtoy.so")
     cnlplib.set_path(tmp_path)
     l1 = cnlplib.lib("toy")
@@ -138,9 +137,8 @@ def test_arguments_bind_positionally_to_the_schema(lib):
 
 
 def test_argument_order_is_load_bearing(lib):
-    """The same values in the wrong order are refused by the slot they land in
-    — n is the int64 scalar, so the float meant for s cannot go there. Coercing
-    would build a different model from the one asked for, silently."""
+    """The same values in the wrong order are refused by the slot they land in: n is the
+    int64 scalar, so the float meant for s cannot go there."""
     with pytest.raises(TypeError, match=r"'n' is an int64"):
         cnlplib.CModel(lib, 2.0, 4, np.array([1.0, 2.0, 3.0, 4.0]), prefix="sq")
     # The same guard on arrays and table columns, which the fixture's schema
@@ -174,9 +172,7 @@ def test_a_bool_is_not_an_argument(lib):
 
 
 def test_fixed_library_needs_no_arguments(lib):
-    # `fx` declares zero instantiation arguments (fx_nargs() == 0), so no
-    # arguments instantiate it directly through fx_new — whose integer is part
-    # of the C signature and ignored.
+    # fx_nargs() == 0: no arguments instantiate it through fx_new, whose integer is ignored
     m0 = cnlplib.CModel(lib, prefix="fx")
     assert (m0.nvar, m0.ncon) == (3, 1)
     assert m0.obj(np.array([0.5, 0.5, 1.0])) == 0.5
@@ -191,9 +187,7 @@ def test_string_is_at_name_on_search_path_or_literal_path(sopath, tmp_path, monk
     assert cnlplib._is_name("@toy")
     assert cnlplib._default_prefix("@toy") == "toy"
 
-    # Anything else is a filesystem path, exactly as written. A full path to
-    # the library file, with the prefix defaulting from the file name
-    # (libtinyqp.so → tinyqp), overridable as always:
+    # Anything else is a path; the prefix defaults from the file name (libtinyqp.so → tinyqp).
     assert not cnlplib._is_name(spec)
     assert cnlplib._default_prefix(spec) == "tinyqp"
     mp = cnlplib.CModel(spec, 4, prefix="tq")
@@ -213,8 +207,7 @@ def test_string_is_at_name_on_search_path_or_literal_path(sopath, tmp_path, monk
     md = cnlplib.CModel(str(bdir), 4, prefix="tq")
     assert md.nvar == 4
 
-    # A bare string without `@` is a file in the current directory — NOT a
-    # search-path name.
+    # A bare string without `@` is a file in the current directory, not a search-path name.
     shutil.copy(sopath, tmp_path / "qp.so")
     monkeypatch.chdir(tmp_path)
     mc = cnlplib.CModel("qp.so", 4, prefix="tq")
@@ -229,10 +222,7 @@ def test_string_is_at_name_on_search_path_or_literal_path(sopath, tmp_path, monk
 
 def test_search_path_initializes_from_the_environment(monkeypatch, tmp_path):
     cnlplib.set_path()                      # empty the registry
-    monkeypatch.setenv("CNLPMODELS_PATH", f"{tmp_path}:/nonexistent")
-    assert cnlplib._paths() == [str(tmp_path), "/nonexistent"]
-    cnlplib.set_path()
-    monkeypatch.setenv("CNLPLIB_PATH", f"/a:{tmp_path}")       # the current name wins
+    monkeypatch.setenv("CNLPLIB_PATH", f"/a:{tmp_path}")
     assert cnlplib._paths() == ["/a", str(tmp_path)]
     cnlplib.set_path()                      # leave no residue for later tests
 
@@ -309,9 +299,7 @@ def test_evaluation_shape_guards(lib):
 
 
 # ── Selecting a model by name in a library carrying several ──────────────────
-# The fixture carries several models in ONE shared library; a leading string
-# argument names one, and the name is the symbol prefix — the same selection
-# spelling as CNLPModels.jl's `CNLPModel(lib, :tq, ...)`.
+# A leading string argument names one; the name is the symbol prefix.
 
 
 def test_model_selection_by_name(lib):
@@ -332,8 +320,7 @@ def test_model_selection_by_name(lib):
 
 
 def test_unknown_model_name_is_refused_clearly(lib):
-    # A mistyped name is reported at selection, with the witness spelled out —
-    # not as a raw ctypes `undefined symbol` several calls later.
+    # a mistyped name is reported at selection, not as an `undefined symbol` later
     with pytest.raises(ValueError, match=r"carries no model named 'nosuch'"):
         cnlplib.CModel(lib, "nosuch", 4)
     with pytest.raises(ValueError, match=r"carries no model named"):
@@ -344,40 +331,20 @@ def test_leading_string_selects_unless_prefix_settles_it(lib):
     # With no prefix=, a leading string selects; a matching one is harmless.
     assert cnlplib.CModel(lib, "tq", 4).nvar == 4
     assert cnlplib.CModel(lib, "tq", 4, prefix="tq").nvar == 4
-    # With an explicit DIFFERENT prefix, selection is settled and the string
-    # becomes an argument. A LONE string then routes to the string entry
-    # point (sq has none, and the refusal says so) —
+    # With an explicit different prefix the string is an argument: a lone string routes to
+    # the string entry point (sq has none), several arguments to the builder.
     with pytest.raises(ValueError, match=r"no string entry point"):
         cnlplib.CModel(lib, "tq", prefix="sq")
-    # — while several arguments flow to the builder, where positional binding
-    # refuses on arity, naming the schema.
     with pytest.raises(ValueError, match=r"declares 3 fields"):
         cnlplib.CModel(lib, "tq", 4, prefix="sq")
 
 
-def test_a_string_argument_is_not_mistaken_for_a_model_name(lib, sopath, tmp_path):
-    """The library decides, because a model argument CAN be a string.
-
-    `ps` instantiates from one string (a path, a case name -- here a decimal
-    size), so `CModel(spec, "5")` on a library whose model IS `ps` has to pass
-    the string through. Read as a model name instead it selects nothing, which
-    is what a model compiled around an argument function used to hit.
-    """
-    import shutil
-
-    # a library whose default prefix (from its filename) is the string-taking
-    # model, which is the shape `compile_library("@fit", ...)` produces
+def test_a_string_argument_is_not_mistaken_for_a_model_name(sopath, tmp_path):
+    """`ps` instantiates from one string, so on a library whose default prefix (from its
+    file name) is `ps`, `CModel(spec, "5")` passes the string through."""
     as_ps = tmp_path / "libps.so"
     shutil.copy(sopath, as_ps)
     assert cnlplib.CModel(str(as_ps), "5").nvar == 5
-
-    # a string that DOES name a model still selects that model
-    assert cnlplib.CModel(lib, "tq", 4).nvar == 4
-
-    # and one that is neither is refused as a name, which is what it is:
-    # `rec` (the fallback prefix) takes no string, so nothing else was meant
-    with pytest.raises(ValueError, match=r"carries no model named 'nosuch'"):
-        cnlplib.CModel(lib, "nosuch", 4)
 
 
 def test_schema_by_model_name(lib):
@@ -386,7 +353,6 @@ def test_schema_by_model_name(lib):
 
 
 def test_at_sigil_is_accepted_by_lib(lib, tmp_path):
-    import shutil
     shutil.copy(pathlib.Path(lib._name), tmp_path / "libtoy9.so")
     cnlplib.set_path(tmp_path)
     assert cnlplib.lib("@toy9") is cnlplib.lib("toy9")     # one cache entry
@@ -394,9 +360,8 @@ def test_at_sigil_is_accepted_by_lib(lib, tmp_path):
     assert m.nvar == 4
 
 
-# ── Named blocks ─────────────────────────────────────────────────────────────
-# The fixture publishes a layout: `x` (variable), `budget` (constraint), `w`
-# (parameter) — the same surface a compiled ExaModels library publishes.
+# ── Named blocks: the fixture publishes `x` (variable), `budget` (constraint), `w`
+# (parameter) ─────────────────────────────────────────────────────────────────
 
 
 def test_named_blocks(lib):
@@ -451,11 +416,8 @@ def test_library_without_named_blocks(lib):
 
 
 def test_catalogue_and_argtype(lib):
-    # The catalogue answers the one question a caller with only a path has;
-    # the fixture's four complete models, in its published order.
     assert cnlplib.available_models(lib) == ["tq", "sq", "fx", "tb", "ps"]
-    # cnlp v0.1: every complete model publishes its argument signature; a
-    # prefix without one answers "" — degradation, never an exception.
+    # a prefix without a published signature answers "", not an exception
     assert cnlplib.argtype(lib, "tq") == "int|size"
     assert cnlplib.argtype(lib, "sq") == "int|n,f64|s,Vector{f64}|w"
     assert cnlplib.argtype(lib, "fx") == ""
@@ -463,8 +425,7 @@ def test_catalogue_and_argtype(lib):
 
 
 def test_string_instantiation(lib):
-    # A lone string argument routes to `<prefix>_new_str`, exactly as a lone
-    # integer routes to `<prefix>_new`; `argtype` is how a caller knows.
+    # a lone string routes to `<prefix>_new_str`, as a lone integer routes to `<prefix>_new`
     assert cnlplib.argtype(lib, "ps") == "string|size, in decimal"
     m = cnlplib.CModel(lib, "5", prefix="ps")
     assert m.nvar == 5

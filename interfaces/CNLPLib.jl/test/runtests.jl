@@ -4,8 +4,7 @@ using NLPModels
 using LinearAlgebra
 using MadNLP
 
-# Build the hermetic C fixture (no Julia involved on the producer side).
-# the shared fixture (conformance/tinyqp.c), compiled against this repository's cnlp.h
+# The shared fixture (conformance/tinyqp.c), compiled against this repository's cnlp.h.
 const ROOT = normpath(joinpath(@__DIR__, "..", "..", ".."))
 const FIXDIR = joinpath(ROOT, "conformance")
 const LIBPATH = joinpath(mktempdir(), "libtinyqp.so")
@@ -79,9 +78,7 @@ run(`$cc -shared -fPIC -O2 -I$ROOT -o $LIBPATH $(joinpath(FIXDIR, "tinyqp.c"))`)
         o_before = obj(m, x)
         m6 = CNLPModel(lib, 6; prefix = "tq")
         @test m6.meta.nvar == 6
-        # Creating a second instance must not disturb the first (this was the
-        # single-slot silent-corruption hazard of the pre-handle ABI).
-        @test obj(m, x) == o_before
+        @test obj(m, x) == o_before          # a second instance does not disturb the first
         @test m.id != m6.id
         res6 = madnlp(m6; print_level = MadNLP.ERROR)
         res4 = madnlp(m; print_level = MadNLP.ERROR)
@@ -155,22 +152,18 @@ end
     x = [0.5, 0.25, 2.0, -1.0]
     n, s, w = 4, 2.0, [1.0, 2.0, 3.0, 4.0]
 
-    # The fixture carries four models in ONE shared library. Naming one selects
-    # it, and the name is the symbol prefix its ABI functions are exported under.
+    # the name is the symbol prefix the model's ABI functions are exported under
     m = CNLPModel(lib, :tq, 4)
     @test m.meta.nvar == 4
     @test m.meta.name == "tq"                       # the model, not the file
 
-    # A second, unrelated model out of the same library: different schema,
-    # different instantiation surface (builder-only), different objective.
-    ms = CNLPModel(lib, :sq, n, s, w)
+    ms = CNLPModel(lib, :sq, n, s, w)               # builder-only sibling
     @test ms.lib === m.lib                          # one library, one runtime
     @test obj(m, x) == sum((x .- 1.0) .^ 2)
     @test obj(ms, x) == sum(w .* (x .- s) .^ 2)
     @test madnlp(ms; print_level = MadNLP.ERROR).status == MadNLP.SOLVE_SUCCEEDED
 
-    # Instances of DIFFERENT models coexist as freely as instances of one: each
-    # keeps its own ids, and neither disturbs the other.
+    # instances of different models coexist as freely as instances of one
     m6 = CNLPModel(lib, :tq, 6)
     @test m6.meta.nvar == 6
     @test obj(m, x) == sum((x .- 1.0) .^ 2)
@@ -179,8 +172,7 @@ end
     # A model consuming no instance data still names itself.
     @test CNLPModel(lib, :fx).meta.name == "fx"
 
-    # The same spelling through every library argument: path, search-path name,
-    # string literal. The prefix no longer has to follow the file name.
+    # the same spelling through every library argument
     @test CNLPModel(LIBPATH, :tq, 4).meta.nvar == 4
     @test CNLPModel("@toyqp", :tq, 4).meta.nvar == 4
     @test CNLPModel(cnlp"toyqp", :tq, 4).meta.nvar == 4
@@ -193,27 +185,16 @@ end
           ["n", "s", "w"]
     @test CNLPLib._schema_field_names(CNLPLib.schema_json(lib, :tq)) == ["n"]
 
-    # A name the library does not carry is reported as such, at the name —
-    # not several calls later as a missing builder surface.
+    # a name the library does not carry is reported at the name
     @test_throws "carries no model named `nosuch`" CNLPModel(lib, :nosuch, 4)
     @test_throws "carries no model named `nosuch`" CNLPModel(lib, :nosuch)
-    # Naming the model and passing `prefix=` are the same knob, so asking for
-    # both is not a method rather than one silently winning.
+    # naming the model and passing `prefix=` are the same knob
     @test_throws MethodError CNLPModel(lib, :tq, 4; prefix = "sq")
-end
-
-@testset "cnlp literal is the shortcut" begin
-    @test cnlp"toyqp" === CNLPLib.lib("toyqp")
-    m = CNLPModel(cnlp"toyqp", 5; prefix = "tq")   # directly as the lib argument
-    @test m.meta.nvar == 5
-    @test_throws ErrorException cnlp"nonexistent"
 end
 
 @testset "a fixed library needs no arguments" begin
     lib = CNLPLib.load(LIBPATH)
-    # `fx` declares zero instantiation arguments (fx_nargs() == 0), so no
-    # arguments instantiate it directly through fx_new — whose integer is
-    # part of the C signature and ignored.
+    # fx_nargs() == 0: no arguments instantiate it through fx_new, whose integer is ignored
     m0 = CNLPModel(lib; prefix = "fx")
     @test m0.meta.nvar == 3
     @test m0.meta.ncon == 1
@@ -228,9 +209,7 @@ end
     @test CNLPLib._is_name("@toyqp")
     @test CNLPLib._default_prefix("@toyqp") == "toyqp"
 
-    # Anything else is a filesystem path, exactly as written. A full path to
-    # the library file, with the prefix defaulting from the file name
-    # (libtinyqp.so → tinyqp), overridable as always:
+    # Anything else is a path; the prefix defaults from the file name (libtinyqp.so → tinyqp).
     @test !CNLPLib._is_name(LIBPATH)
     @test CNLPLib._default_prefix(LIBPATH) == "tinyqp"
     mp = CNLPModel(LIBPATH, 4; prefix = "tq")
@@ -250,14 +229,12 @@ end
     md = CNLPModel(joinpath(bdir, "toyqp2"), 4; prefix = "tq")
     @test md.meta.nvar == 4
 
-    # A bare string without `@` is a file in the current directory — NOT a
-    # search-path name.
+    # A bare string without `@` is a file in the current directory, not a search-path name.
     cd(bdir) do
         cp(LIBPATH, joinpath(bdir, "qp.so"))
         mc = CNLPModel("qp.so", 4; prefix = "tq")
         @test mc.meta.nvar == 4
-        # `toyqp` is on the search path from the registry testset above, but
-        # without `@` it is a missing local file, and says so.
+        # `toyqp` is on the search path, but without `@` it is a missing local file
         @test_throws "no shared library at" CNLPModel("toyqp", 4)
     end
 
@@ -331,11 +308,8 @@ end
     @test CNLPLib._stdlinked_libjulia("/nonexistent/libfoo.so") === nothing
     @test CNLPLib._stdlinked_libjulia(joinpath(FIXDIR, "tinyqp.c")) === nothing
 
-    # A library that links the standard libjulia soname is detected, with its
-    # version — the trigger for the private-runtime route. Built here by
-    # linking the fixture against this process's own libjulia. (Detection is
-    # a whole-function return, not a loop-local one: a regression to the
-    # latter loses the value and silently downgrades to the aborting path.)
+    # A library that links the standard libjulia soname is detected, with its version:
+    # the fixture linked against this process's own libjulia.
     if Sys.islinux()
         using Libdl
         libjulia = realpath(Libdl.dlpath("libjulia"))
@@ -349,9 +323,7 @@ end
 
 @testset "named blocks" begin
     lib = CNLPLib.load(LIBPATH)
-    # The fixture publishes a layout: `x` (variable), `budget` (constraint),
-    # `w` (parameter). A consumer handed only the library learns the names the
-    # model was written with, and addresses slices by them.
+    # the fixture publishes `x` (variable), `budget` (constraint), `w` (parameter)
     m = CNLPModel(lib, 4; prefix = "tq")
     @test keys(get_vars(m)) == (:x,)
     @test keys(get_cons(m)) == (:budget,)
@@ -360,23 +332,18 @@ end
     b = get_vars(m, :x)
     @test b === get_vars(m).x
     @test (b.kind, b.offset, b.length, b.dims) == (:var, 0, 4, (4,))
-    # Lengths follow the INSTANCE, not the library: a second model at another
-    # size reports its own.
+    # lengths follow the instance
     @test get_vars(CNLPModel(lib, 7; prefix = "tq"), :x).length == 7
 
-    # The two ways of asking wrongly are distinguished: a name of the wrong
-    # kind names the accessor that would work, a typo lists what exists.
+    # a name of the wrong kind names the accessor that would work; a typo lists what exists
     @test_throws "is a parameter (get_pars), not a var" get_vars(m, :w)
     @test_throws "is a variable (get_vars), not a par" get_pars(m, :x)
     @test_throws "no named variable `nope`" get_vars(m, :nope)
 
-    # Result extraction, against a hand-built result: the block reshapes its
-    # own slice, which is the whole point of publishing dims.
+    # extraction from a result object and from a bare vector
     res = (solution = [1.0, 2.0, 3.0, 4.0], multipliers = [7.0],
            multipliers_L = [0.1, 0.2, 0.3, 0.4], multipliers_U = [0.5, 0.6, 0.7, 0.8])
     @test solution(res, b) == [1.0, 2.0, 3.0, 4.0]
-    # The bare-vector spelling extracts too — `res.solution` in hand is as
-    # natural as the result object, and used to fail with a bare FieldError.
     @test solution(res.solution, b) == [1.0, 2.0, 3.0, 4.0]
     @test multipliers_L(res.multipliers_L, b) == [0.1, 0.2, 0.3, 0.4]
     @test multipliers(res, get_cons(m, :budget)) == [7.0]
@@ -393,9 +360,7 @@ end
     @test_throws DimensionMismatch set_value!(m, p, [1.0])
     @test_throws "not a parameter" get_value(m, b)
 
-    # Named blocks are an optional ABI surface, not a requirement: `sq`
-    # publishes none — as a hand-written C library may — and everything else
-    # about it still works.
+    # named blocks are optional: `sq` publishes none, and everything else still works
     ms = CNLPModel(lib, 4, 2.0, [1.0, 2.0, 3.0, 4.0]; prefix = "sq")
     @test keys(get_vars(ms)) == ()
     @test_throws "publishes no named blocks" get_vars(ms, :x)
@@ -404,33 +369,24 @@ end
 
 @testset "discoverability" begin
     lib = CNLPLib.load(LIBPATH)
-    # The catalogue answers the one question a caller with only a path has.
     @test available_models(lib) == [:tq, :sq, :fx, :tb, :ps]
-    # Argument signatures (cnlp v0.1): every complete model publishes what
-    # it instantiates from, mirroring its schema; a fixed model answers "".
     @test argtype(lib, :tq) == "int|size"
     @test argtype(lib, :sq) == "int|n,f64|s,Vector{f64}|w"
     @test argtype(lib, :tb) == "Table{i::int w::f64}|pts"
     @test argtype(lib, :fx) == ""
     @test argtype(lib, :ps) == "string|size, in decimal"
-    # A prefix with no published signature still answers "" — degradation,
-    # not an error (bf is a deliberately partial stub).
-    @test argtype(lib, :bf) == ""
-    # — and schema is an answer, not a throw, for models without one.
+    @test argtype(lib, :bf) == ""                   # no published signature: "", not an error
     @test schema_json(lib; prefix = "fx") === nothing
     @test schema_json(lib; prefix = "tq") isa AbstractString   # tq has one
 end
 
 @testset "string instantiation" begin
     lib = CNLPLib.load(LIBPATH)
-    # A lone string argument routes to `<prefix>_new_str` — the entry point
-    # `argtype` announces with a lone "string" — exactly as a lone integer
-    # routes to `<prefix>_new`.
+    # a lone string routes to `<prefix>_new_str`, as a lone integer routes to `<prefix>_new`
     m = CNLPModel(lib, "5"; prefix = "ps")
     @test m.meta.nvar == 5
     @test NLPModels.obj(m, zeros(5)) == 4.0 * 5     # sum (0-2)^2
-    # A model without the string entry point refuses with its signature, so
-    # the caller learns what the model DOES take.
+    # a model without the string entry point refuses with its signature
     err = try CNLPModel(lib, "5"; prefix = "tq"); nothing catch e; sprint(showerror, e) end
     @test occursin("no string entry point", err) && occursin("int|size", err)
     # The library's own failure (an unparsable string) surfaces as a status.
@@ -447,8 +403,7 @@ end
     c1 = zeros(1); c2 = zeros(1)
     NLPModels.cons!(m, x, c1); NLPModels.cons_nln!(m, x, c2)
     @test c1 == c2
-    # hprod against the assembled dense Hessian — the definition, not the
-    # implementation: tq's Hessian is 2*obj_weight*I, so both legs are exact.
+    # tq's Hessian is 2*obj_weight*I
     for ow in (1.0, 0.7)
         Hv = zeros(4)
         NLPModels.hprod!(m, x, y, v, Hv; obj_weight = ow)
@@ -459,19 +414,11 @@ end
     end
 end
 
-@testset "layout robustness and block sizes" begin
-    lib = CNLPLib.load(LIBPATH)
-    m = CNLPModel(lib, 4; prefix = "tq")
-    # Coverage audits sum lengths and read shapes off the refs directly.
+@testset "block sizes" begin
+    m = CNLPModel(CNLPLib.load(LIBPATH), 4; prefix = "tq")
     b = get_vars(m, :x)
     @test length(b) == 4 && size(b) == (4,)
     @test sum(length, values(get_vars(m))) == m.meta.nvar
-    # A model whose layout READ fails still constructs and evaluates: `bf`
-    # exports a partial surface, so its (absent) layout reports empty rather
-    # than killing the model — the tier is optional, the evaluators are not.
-    # (The fixture has no conformant-but-lying library to probe the warn
-    # path hermetically; the empty-tier path is what is testable here.)
-    @test keys(get_vars(CNLPModel(lib, 4; prefix = "tq"))) == (:x,)
 end
 
 @testset "standard solution format (cnlp-solution 0.2)" begin

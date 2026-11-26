@@ -265,9 +265,6 @@ The options a cnlp solver receives (`key=value` strings), read from the C arrays
 solver_options(n::Integer, keys::Ptr{Ptr{UInt8}}, vals::Ptr{Ptr{UInt8}}) =
     Pair{String, String}[unsafe_string(unsafe_load(keys, k)) => unsafe_string(unsafe_load(vals, k)) for k in 1:n]
 
-_host(v::Vector{Float64}) = v
-_host(v::AbstractVector) = Vector{Float64}(Array(v))
-
 _text128(s::AbstractString) = (b = codeunits(s); ntuple(i -> i < 128 && i <= length(b) ? b[i] : 0x00, 128))
 
 """
