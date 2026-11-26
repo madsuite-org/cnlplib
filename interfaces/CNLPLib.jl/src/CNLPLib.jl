@@ -122,12 +122,41 @@ carries a Julia runtime of its own; an unbundled one, linked against the standar
 `libjulia`, would share this session's runtime and abort the process, so it is refused.
 """
 # Whether a library asks for the standard libjulia by name (a bundle's libjulia has a salted
-# name; a plain C library asks for none): the name, NUL-terminated, in its string table.
+# name, `<salt>_libjulia.so.1.13`; a plain C library asks for none): its DT_NEEDED entries,
+# read from the ELF64 dynamic section. Not ELF64 little-endian (macOS, a script): false.
 function _unbundled(path::AbstractString)
     isfile(path) || return false
-    bytes = Mmap.mmap(path)
-    return any(n -> findfirst(n, bytes) !== nothing,
-               (b"\0libjulia.so.1", b"/libjulia.1.", b"\0libjulia.1."))
+    b = Mmap.mmap(path)
+    (length(b) >= 64 && b[1:4] == [0x7f, UInt8('E'), UInt8('L'), UInt8('F')] && b[5] == 2 && b[6] == 1) || return false
+    u64(o) = ltoh(reinterpret(UInt64, view(b, o+1:o+8))[1])
+    u16(o) = ltoh(reinterpret(UInt16, view(b, o+1:o+2))[1])
+    phoff, phnum = u64(0x20), Int(u16(0x38))
+    loads, dyn = Tuple{UInt64, UInt64, UInt64}[], nothing     # (vaddr, offset, size)
+    for k in 0:(phnum - 1)
+        h = Int(phoff) + 56k
+        h + 56 <= length(b) || return false
+        t = ltoh(reinterpret(UInt32, view(b, h+1:h+4))[1])
+        t == 1 && push!(loads, (u64(h + 16), u64(h + 8), u64(h + 32)))
+        t == 2 && (dyn = (u64(h + 8), u64(h + 32)))
+    end
+    dyn === nothing && return false
+    off(v) = (for (va, o, n) in loads; va <= v < va + n && return Int(o + v - va); end; nothing)
+    strtab, needed = nothing, UInt64[]
+    for o in Int(dyn[1]):16:(Int(dyn[1] + dyn[2]) - 16)
+        tag = u64(o)
+        tag == 0 && break
+        tag == 5 && (strtab = u64(o + 8))
+        tag == 1 && push!(needed, u64(o + 8))
+    end
+    st = strtab === nothing ? nothing : off(strtab)
+    st === nothing && return false
+    for n in needed
+        s = st + Int(n)
+        e = findnext(==(0x00), b, s + 1)
+        e === nothing && continue
+        occursin(r"^libjulia\.so\.\d", String(b[s+1:e-1])) && return true
+    end
+    return false
 end
 
 function load(path::AbstractString)

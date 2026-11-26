@@ -340,6 +340,12 @@ end
              -Wl,--no-as-needed $libjulia`)
         @test CNLPLib._unbundled(linked)
         @test_throws "build it as a bundle" CNLPLib.load(linked)
+        # a library that only mentions the name (a bundle's image does, in its data) is not one
+        src = joinpath(mktempdir(), "mention.c")
+        write(src, "const char *jl_name = \"libjulia.so.1.13\";\n")
+        mention = joinpath(dirname(src), "libmention.so")
+        run(`$cc -shared -fPIC -o $mention $src`)
+        @test !CNLPLib._unbundled(mention)
     end
 end
 
