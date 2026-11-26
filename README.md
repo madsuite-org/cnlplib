@@ -23,8 +23,7 @@ Documentation: **[cnlplib.madsuite.org](https://cnlplib.madsuite.org)**: the ABI
 [publish a model library](https://cnlplib.madsuite.org/models/) or
 [add a solver](https://cnlplib.madsuite.org/solvers/).
 
-Interfaces, in [interfaces/](interfaces): [CNLPLib.jl](interfaces/CNLPLib.jl) (Julia: cnlp
-libraries as NLPModels, and the solver side of the interface) and
+Interfaces, in [interfaces/](interfaces): [CNLPLib.jl](interfaces/CNLPLib.jl) (Julia) and
 [cnlplib](interfaces/cnlplib-py) (Python).
 
 MIT license. Each library in the registry carries its own license, recorded in its entry.

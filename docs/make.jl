@@ -103,6 +103,8 @@ makedocs(
         "Home" => "index.md",
         "Registry" => "registry.md",
         "The cnlp command" => "cli.md",
+        "Julia" => "julia.md",
+        "Python" => "python.md",
         "Publishing models" => "models.md",
         "Adding solvers" => "solvers.md",
         "Formats" => [
