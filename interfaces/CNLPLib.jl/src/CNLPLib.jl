@@ -32,6 +32,7 @@ import NLPModels: NLPModels, AbstractNLPModel, NLPModelMeta, Counters,
 export CNLPModel, argtype, available_models, restore_blas!, schema_json, set_path!, @cnlp_str,
     get_vars, get_cons, get_pars, get_value, set_value!,
     solution, multipliers, multipliers_L, multipliers_U, writers, write_solution, default_writer,
+    report_instance, report_solution,
     readers, default_reader, read_start, read_parameters!
 
 include("patchversion.jl")
@@ -900,6 +901,36 @@ function write_solution(m::CNLPModel, writer::Symbol, path::AbstractString, resu
     y, zl, zu = _to_cnlp_signs(m, result.multipliers, result.multipliers_L, result.multipliers_U)
     return write_solution(m, writer, path, result.solution, y, zl, zu;
                           objective = result.objective, status = string(result.status))
+end
+
+"""
+    report_instance(m) -> String
+    report_solution(m, result) -> String
+
+The library's reports (cnlp.h, the reports tier): text about the instance (what it was built
+from, its size), and about a solution (for an optimal power flow, the generation cost and the
+constraint violations by group). `""` when the library has none. `result` is a solver result
+as for [`write_solution`](@ref).
+"""
+function report_instance(m::CNLPModel)
+    fp = Libdl.dlsym(m.lib.handle, Symbol(m.prefix, "_report_instance"); throw_error = false)
+    return fp === nothing ? "" : _copyout(fp, m.id)
+end
+
+@doc (@doc report_instance)
+function report_solution(m::CNLPModel, result)
+    fp = Libdl.dlsym(m.lib.handle, Symbol(m.prefix, "_report_solution"); throw_error = false)
+    fp === nothing && return ""
+    x = _host(result.solution)
+    y, zl, zu = map(_host, _to_cnlp_signs(m, result.multipliers, result.multipliers_L, result.multipliers_U))
+    st = _status(result.status)
+    f(buf, cap) = ccall(fp, Int64, (Int64, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Cdouble, Cstring, Ptr{UInt8}, Int64),
+                        m.id, x, y, zl, zu, Cdouble(result.objective), st, buf, cap)
+    n = f(C_NULL, Int64(0))
+    n <= 0 && return ""
+    buf = Vector{UInt8}(undef, n)
+    f(buf, n)
+    return String(buf)
 end
 
 # Multiplier signs. A cnlp solution satisfies σ∇f + Jᵀy − zL + zU = 0 (σ = −1 when the model

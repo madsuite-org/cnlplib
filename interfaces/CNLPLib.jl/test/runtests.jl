@@ -28,6 +28,12 @@ run(`$cc -shared -fPIC -O2 -I$ROOT -o $LIBPATH $(joinpath(FIXDIR, "tinyqp.c"))`)
 
     m = CNLPModel(lib, 4; prefix = "tq")
 
+    @testset "reports: empty for a library without them" begin
+        @test report_instance(m) == ""
+        @test report_solution(m, (solution = zeros(4), multipliers = zeros(1), multipliers_L = zeros(4),
+                                  multipliers_U = zeros(4), objective = 0.0, status = :first_order)) == ""
+    end
+
     @testset "meta" begin
         @test m.meta.nvar == 4
         @test m.meta.ncon == 1
