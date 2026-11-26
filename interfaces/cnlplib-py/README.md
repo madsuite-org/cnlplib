@@ -3,7 +3,8 @@
 [![python](https://github.com/madsuite-org/cnlplib/actions/workflows/python.yml/badge.svg)](https://github.com/madsuite-org/cnlplib/actions/workflows/python.yml)
 
 ```sh
-pip install "git+https://github.com/madsuite-org/cnlplib#subdirectory=interfaces/cnlplib-py"
+pip install "cnlplib @ git+https://github.com/madsuite-org/cnlplib#subdirectory=interfaces/cnlplib-py"
+pip install "cnlplib[cuda] @ git+https://github.com/madsuite-org/cnlplib#subdirectory=interfaces/cnlplib-py"  # GPU (CuPy)
 ```
 
 A [cnlp library](https://cnlplib.madsuite.org) (a nonlinear program behind the C ABI of
@@ -14,10 +15,10 @@ hand it to any solver that takes NLP callbacks (`scipy.optimize`).
 ```python
 import cnlplib
 
-m = cnlplib.CModel("@lv", "wood", 10000)                    # the registry's lv library, model wood
+m = cnlplib.CModel("@lv", "wood", 10000)  # the registry's lv library, model wood
 m = cnlplib.CModel("@emp", "acp", "pglib_opf_case118_ieee")  # a data-set file, by name
-m = cnlplib.CModel("/path/to/libmymodel.so", 1000)          # a path: library file or bundle dir
-r = cnlplib.solve(m, solver="madnlp")                    # r.solution, r.objective
+m = cnlplib.CModel("/path/to/libmymodel.so", 1000)  # a path: library file or bundle dir
+r = cnlplib.solve(m, solver="madnlp")  # r.solution, r.objective
 ```
 
 `m` exposes `nvar`, `ncon`, `nnzj`, `nnzh`, `x0`, `lvar`, `uvar`, `lcon`, `ucon`,
@@ -39,17 +40,18 @@ instantiate the model, one per field of its schema, in the library's order, each
 against the kind and type the schema declares; a table is a dict of equal-length columns:
 
 ```python
-m = cnlplib.CModel("@mymodel",
-    {"i": np.array([1, 2]), "pd": np.array([0.4, 0.3])},   # a table
-    np.array([0.9, 0.9]),                                  # an array
-    100.0,                                                 # a scalar
+m = cnlplib.CModel(
+    "@mymodel",
+    {"i": np.array([1, 2]), "pd": np.array([0.4, 0.3])},  # a table
+    np.array([0.9, 0.9]),  # an array
+    100.0,  # a scalar
 )
 ```
 
 `available_models(lib)`, `argtype(lib, "wood")` and `schema(lib, "wood")` say what a
 library carries and what each model takes. `m.get_vars()`, `m.get_cons()` and
 `m.get_pars()` are the model's named blocks, for `solution(x, m.get_vars("pg"))`,
-`multipliers`, `multipliers_L`, `multipliers_U`, and `m.get_value` / `m.set_value` on
+`multipliers`, `multipliers_lower`, `multipliers_upper`, and `m.get_value` / `m.set_value` on
 parameters.
 
 `cnlplib.solve(m, solver="madnlp", **options)` solves with a cnlp solver installed in the

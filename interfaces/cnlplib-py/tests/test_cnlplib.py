@@ -1,14 +1,13 @@
 """Tests against the plain-C fixture, conformance/tinyqp.c."""
+
 import os
 import pathlib
 import shutil
 import subprocess
-import sys
 
 import numpy as np
 import pytest
 
-sys.path.insert(0, str(pathlib.Path(__file__).parents[1] / "src"))
 import cnlplib
 
 # the shared fixture (conformance/tinyqp.c), compiled against this repository's cnlp.h
@@ -41,7 +40,7 @@ def test_meta(m):
     assert np.all(np.isinf(m.lvar)) and np.all(m.lvar < 0)
     assert np.all(np.isinf(m.uvar)) and np.all(m.uvar > 0)
     assert m.lcon.tolist() == [0.0] and m.ucon.tolist() == [0.0]
-    assert m.minimize   # no sense tier, or P_minimize = 1
+    assert m.minimize  # no sense tier, or P_minimize = 1
 
 
 def test_evaluations_match_closed_form(m):
@@ -50,7 +49,7 @@ def test_evaluations_match_closed_form(m):
     assert np.array_equal(m.grad(x), 2.0 * (x - 1.0))
     assert m.cons(x).tolist() == [x[0] + x[1] - 1.0]
     rows, cols = m.jac_structure()
-    assert rows.tolist() == [0, 0] and cols.tolist() == [0, 1]   # 0-based
+    assert rows.tolist() == [0, 0] and cols.tolist() == [0, 1]  # 0-based
     assert m.jac(x).tolist() == [1.0, 1.0]
     hr, hc = m.hess_structure()
     assert hr.tolist() == [0, 1, 2, 3] and hc.tolist() == [0, 1, 2, 3]
@@ -77,9 +76,11 @@ def test_solve_with_scipy(m):
     min sum((x-1)^2) s.t. x1+x2=1 has optimum 0.5 at (.5, .5, 1, 1)."""
     scipy = pytest.importorskip("scipy.optimize")
     res = scipy.minimize(
-        m.obj, m.x0, jac=m.grad, method="SLSQP",
-        constraints=[{"type": "eq", "fun": m.cons,
-                      "jac": lambda x: np.array([[1.0, 1.0, 0.0, 0.0]])}],
+        m.obj,
+        m.x0,
+        jac=m.grad,
+        method="SLSQP",
+        constraints=[{"type": "eq", "fun": m.cons, "jac": lambda x: np.array([[1.0, 1.0, 0.0, 0.0]])}],
     )
     assert res.success
     assert abs(res.fun - 0.5) < 1e-8
@@ -90,8 +91,8 @@ def test_name_based_loading(lib, tmp_path):
     shutil.copy(pathlib.Path(lib._name), tmp_path / "libtoy.so")
     cnlplib.set_path(tmp_path)
     l1 = cnlplib.lib("toy")
-    assert cnlplib.lib("toy") is l1                      # cached
-    m = cnlplib.CModel("@toy", 4, prefix="tq")         # name-based
+    assert cnlplib.lib("toy") is l1  # cached
+    m = cnlplib.CModel("@toy", 4, prefix="tq")  # name-based
     assert m.nvar == 4
     # not found anywhere: the registry (a local, empty index) has no such library either
     empty = tmp_path / "index.tsv"
@@ -109,19 +110,18 @@ def test_lone_integer_takes_the_one_knob_constructor(lib):
     assert [f["name"] for f in cnlplib.schema(lib, prefix="tq")["fields"]] == ["n"]
     m = cnlplib.CModel(lib, 5, prefix="tq")
     assert m.nvar == 5
-    assert m.obj(np.zeros(5)) == 5.0          # sum (0 - 1)^2
+    assert m.obj(np.zeros(5)) == 5.0  # sum (0 - 1)^2
 
 
 def test_arguments_bind_positionally_to_the_schema(lib):
     """`sq` is builder-only (no sq_new) and declares three fields, so the
     arguments bind positionally in the order the schema publishes them."""
-    assert [f["name"] for f in cnlplib.schema(lib, prefix="sq")["fields"]] == \
-        ["n", "s", "w"]
+    assert [f["name"] for f in cnlplib.schema(lib, prefix="sq")["fields"]] == ["n", "s", "w"]
     n, s, w = 4, 2.0, np.array([1.0, 2.0, 3.0, 4.0])
     m = cnlplib.CModel(lib, n, s, w, prefix="sq")
     assert (m.nvar, m.ncon) == (4, 1)
     x = np.array([0.5, 0.25, 2.0, -1.0])
-    assert m.obj(x) == np.sum(w * (x - s) ** 2)        # min sum w_i (x_i - s)^2
+    assert m.obj(x) == np.sum(w * (x - s) ** 2)  # min sum w_i (x_i - s)^2
     assert np.array_equal(m.grad(x), 2.0 * w * (x - s))
     assert np.array_equal(m.hess(x, np.array([3.0]), obj_weight=0.7), 1.4 * w)
     assert m.cons(x).tolist() == [x[0] + x[1] - 1.0]
@@ -134,9 +134,9 @@ def test_argument_order_is_load_bearing(lib):
         cnlplib.CModel(lib, 2.0, 4, np.array([1.0, 2.0, 3.0, 4.0]), prefix="sq")
     # The same guard on arrays and table columns, which the fixture's schema
     # has no int64 instance of.
-    assert cnlplib._as_col([1.0, 2.0], "f64").dtype == np.float64
+    assert cnlplib.model._as_col([1.0, 2.0], "f64").dtype == np.float64
     with pytest.raises(TypeError, match=r"int64 array"):
-        cnlplib._as_col(np.array([1.5, 2.5]), "i64", "bus.i")
+        cnlplib.model._as_col(np.array([1.5, 2.5]), "i64", "bus.i")
 
 
 def test_wrong_arity_names_the_schema(lib):
@@ -175,16 +175,16 @@ def test_fixed_library_needs_no_arguments(lib):
 def test_string_is_at_name_on_search_path_or_literal_path(sopath, tmp_path, monkeypatch):
     spec = str(sopath)
     # `@name` resolves on the search path and defaults the prefix to the name.
-    assert cnlplib._is_name("@toy")
-    assert cnlplib._default_prefix("@toy") == "toy"
+    assert cnlplib.model._is_name("@toy")
+    assert cnlplib.model._default_prefix("@toy") == "toy"
 
     # Anything else is a path; the prefix defaults from the file name (libtinyqp.so → tinyqp).
-    assert not cnlplib._is_name(spec)
-    assert cnlplib._default_prefix(spec) == "tinyqp"
+    assert not cnlplib.model._is_name(spec)
+    assert cnlplib.model._default_prefix(spec) == "tinyqp"
     mp = cnlplib.CModel(spec, 4, prefix="tq")
     assert mp.nvar == 4
     # The handle is cached by absolute path: one dlopen per library.
-    assert cnlplib._resolve_spec(spec) is cnlplib._resolve_spec(spec)
+    assert cnlplib.model._resolve_spec(spec) is cnlplib.model._resolve_spec(spec)
     # A fixed model by path needs nothing beyond the path.
     mf = cnlplib.CModel(spec, prefix="fx")
     assert mf.nvar == 3
@@ -194,7 +194,7 @@ def test_string_is_at_name_on_search_path_or_literal_path(sopath, tmp_path, monk
     bdir = tmp_path / "toyqp2"
     (bdir / "lib").mkdir(parents=True)
     shutil.copy(sopath, bdir / "lib" / "libtoyqp2.so")
-    assert cnlplib._default_prefix(str(bdir)) == "toyqp2"
+    assert cnlplib.model._default_prefix(str(bdir)) == "toyqp2"
     md = cnlplib.CModel(str(bdir), 4, prefix="tq")
     assert md.nvar == 4
 
@@ -212,10 +212,10 @@ def test_string_is_at_name_on_search_path_or_literal_path(sopath, tmp_path, monk
 
 
 def test_search_path_initializes_from_the_environment(monkeypatch, tmp_path):
-    cnlplib.set_path()                      # empty the registry
+    cnlplib.set_path()  # empty the registry
     monkeypatch.setenv("CNLPLIB_PATH", f"/a:{tmp_path}")
-    assert cnlplib._paths() == ["/a", str(tmp_path)]
-    cnlplib.set_path()                      # leave no residue for later tests
+    assert cnlplib.model._paths() == ["/a", str(tmp_path)]
+    cnlplib.set_path()  # leave no residue for later tests
 
 
 def test_a_directory_without_a_library_says_what_it_tried(tmp_path):
@@ -225,18 +225,18 @@ def test_a_directory_without_a_library_says_what_it_tried(tmp_path):
 
 def test_value_guards_name_the_field_and_kind():
     with pytest.raises(TypeError, match="bool is not a model argument"):
-        cnlplib._as_scalar("n", True, "i64")
+        cnlplib.model._as_scalar("n", True, "i64")
     with pytest.raises(TypeError, match="is a float64"):
-        cnlplib._as_scalar("s", "x", "f64")
+        cnlplib.model._as_scalar("s", "x", "f64")
     with pytest.raises(TypeError, match="float64 array"):
-        cnlplib._as_col(np.array(["a"]), "f64", "w")
+        cnlplib.model._as_col(np.array(["a"]), "f64", "w")
     with pytest.raises(ValueError, match="one-dimensional"):
-        cnlplib._as_col(np.ones((2, 2)), "f64", "w")
+        cnlplib.model._as_col(np.ones((2, 2)), "f64", "w")
 
 
 def test_fill_data_validates_keys_against_the_schema(lib):
     with pytest.raises(ValueError, match="do not match schema"):
-        cnlplib._fill_data(lib, "sq", {"n": 4})
+        cnlplib.model._fill_data(lib, "sq", {"n": 4})
 
 
 def test_a_table_field_binds_column_by_column(lib):
@@ -299,7 +299,7 @@ def test_model_selection_by_name(lib):
 
     m = cnlplib.CModel(lib, "tq", 4)
     assert m.nvar == 4
-    ms = cnlplib.CModel(lib, "sq", n, s, w)   # builder-only sibling
+    ms = cnlplib.CModel(lib, "sq", n, s, w)  # builder-only sibling
     assert m.obj(x) == ((x - 1.0) ** 2).sum()
     assert ms.obj(x) == (w * (x - s) ** 2).sum()
 
@@ -348,7 +348,7 @@ def test_at_name_with_model_selection(lib, tmp_path):
     cnlplib.set_path(tmp_path)
     m = cnlplib.CModel("@toy9", "tq", 4)
     assert m.nvar == 4
-    assert cnlplib.lib("toy9") is cnlplib._resolve_spec("@toy9")   # one cache entry
+    assert cnlplib.lib("toy9") is cnlplib.model._resolve_spec("@toy9")  # one cache entry
 
 
 # ── Named blocks: the fixture publishes `x` (variable), `budget` (constraint), `w`
@@ -370,8 +370,8 @@ def test_named_blocks(lib):
     x = np.array([1.0, 2.0, 3.0, 4.0])
     assert cnlplib.solution(x, b).tolist() == [1.0, 2.0, 3.0, 4.0]
     assert cnlplib.multipliers(np.array([7.0]), m.get_cons("budget")).tolist() == [7.0]
-    assert cnlplib.multipliers_L(x, b).tolist() == [1.0, 2.0, 3.0, 4.0]
-    assert cnlplib.multipliers_U(x, b).tolist() == [1.0, 2.0, 3.0, 4.0]
+    assert cnlplib.multipliers_lower(x, b).tolist() == [1.0, 2.0, 3.0, 4.0]
+    assert cnlplib.multipliers_upper(x, b).tolist() == [1.0, 2.0, 3.0, 4.0]
 
 
 def test_named_block_lookup_errors(lib):
@@ -389,7 +389,7 @@ def test_parameter_values(lib):
     p = m.get_pars("w")
     m.set_value(p, [3.0, 4.0])
     assert m.get_value(p).tolist() == [3.0, 4.0]
-    assert m.get_value("w").tolist() == [3.0, 4.0]       # by name too
+    assert m.get_value("w").tolist() == [3.0, 4.0]  # by name too
     with pytest.raises(ValueError, match="has 2 elements, got 1"):
         m.set_value(p, [1.0])
     with pytest.raises(ValueError, match="not a parameter"):

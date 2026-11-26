@@ -4,6 +4,9 @@
 ``$CNLPLIB_HOME`` (default ``~/.cnlplib``), and installs one that is not there with
 ``cnlp install``: one store, and one installer, for the ``cnlp`` command, Julia and Python.
 """
+
+from __future__ import annotations
+
 import os
 import shutil
 import subprocess
@@ -29,8 +32,10 @@ def _cnlp():
         return c
     c = shutil.which("cnlp")
     if c is None:
-        raise RuntimeError("the `cnlp` command is not installed; install it with\n"
-                           "    curl -fsSL https://cnlplib.madsuite.org/install | sh")
+        raise RuntimeError(
+            "the `cnlp` command is not installed; install it with\n"
+            "    curl -fsSL https://cnlplib.madsuite.org/install | sh"
+        )
     return c
 
 
@@ -45,7 +50,7 @@ def _installed(name):
     return None
 
 
-def install(name):
+def install(name: str) -> str:
     """Install registry library, solver or data set `name` ("lv", "emp@nightly", "lv@1.2.0")
     with `cnlp install name`, into $CNLPLIB_HOME (default ~/.cnlplib), and return its
     directory. `lib` calls this for a name it finds nowhere else, so
@@ -61,15 +66,16 @@ def install(name):
     raise RuntimeError(f"`cnlp install {name}` installed nothing under {_home()}")
 
 
-def update(name):
+def update(name: str) -> str:
     """Install registry library `name` again if its current release differs from the
     installed one; see `install`."""
-    from . import _LIBS
+    from .model import _LIBS
+
     _LIBS.pop(name, None)
     return install(name)
 
 
-def registry_lib(name):
+def registry_lib(name: str) -> str:
     """A registry library's file: installed (for `name`, under any channel; for
     `name@channel`, installed with that request), else installed now."""
     n = name.partition("@")[0]
@@ -96,7 +102,7 @@ def _find_data(name):
     return None, sorted(set(near))[:10]
 
 
-def data_file(name):
+def data_file(name: str) -> str:
     """A file of an installed data set by name, as `cnlp solve` resolves one: a path as it
     is, else the file of that exact name, or that name without its extension, under
     $CNLPLIB_HOME/data. A name that matches no file is an error that lists the files whose
@@ -106,7 +112,8 @@ def data_file(name):
         return f
     raise FileNotFoundError(
         f"no file {name!r}: not a path, and no installed data-set file of that name"
-        + (f"; did you mean: {', '.join(near)}" if near else ""))
+        + (f"; did you mean: {', '.join(near)}" if near else "")
+    )
 
 
 def string_arg(s):

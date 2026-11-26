@@ -4,19 +4,26 @@ A solver installed in the store (`cnlp install ipopt`, `cnlp install madnlp`) is
 and kept: its start-up (a runtime, a GPU warm-up) is paid by the first solve only. The model
 library's own functions are handed to it as the problem's callbacks, so the solver evaluates
 the model with no Python in between: on the host, or on the GPU (through the library's device
-tier) for a model created with `backend="cuda"`. They are handed over as they are: a cnlp callback takes `(void* ctx, ...)` and a model
-function `(int64_t id, ...)`, which a 64-bit platform passes in the same register, so the
-instance id is the context.
+tier) for a model created with `backend="cuda"`. They are handed over as they are: a cnlp
+callback takes `(void* ctx, ...)` and a model function `(int64_t id, ...)`, which a 64-bit
+platform passes in the same register, so the instance id is the context.
 """
+
+from __future__ import annotations
+
 import ctypes
 import os
 import sys
 import time
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from . import registry
+
+if TYPE_CHECKING:
+    from .model import CModel
 
 __all__ = ["Result", "load_solver", "solve"]
 
@@ -25,10 +32,33 @@ _STATUS = ("solved", "acceptable", "infeasible", "unbounded", "iteration_limit",
 
 
 class _Problem(ctypes.Structure):
-    _fields_ = [("ctx", _vp), ("nvar", _i64), ("ncon", _i64), ("nnzj", _i64), ("nnzh", _i64),
-                ("minimize", _i64)] + [(k, _vp) for k in (
-                    "x0", "lvar", "uvar", "lcon", "ucon", "y0", "zl0", "zu0",
-                    "obj", "grad", "cons", "jac_structure", "jac", "hess_structure", "hess")]
+    _fields_ = [
+        ("ctx", _vp),
+        ("nvar", _i64),
+        ("ncon", _i64),
+        ("nnzj", _i64),
+        ("nnzh", _i64),
+        ("minimize", _i64),
+    ] + [
+        (k, _vp)
+        for k in (
+            "x0",
+            "lvar",
+            "uvar",
+            "lcon",
+            "ucon",
+            "y0",
+            "zl0",
+            "zu0",
+            "obj",
+            "grad",
+            "cons",
+            "jac_structure",
+            "jac",
+            "hess_structure",
+            "hess",
+        )
+    ]
 
 
 class _DeviceProblem(ctypes.Structure):
@@ -36,8 +66,16 @@ class _DeviceProblem(ctypes.Structure):
 
 
 class _Result(ctypes.Structure):
-    _fields_ = [("x", _vp), ("y", _vp), ("zl", _vp), ("zu", _vp), ("objective", _dbl),
-                ("status", _i64), ("iterations", _i64), ("solver_status", ctypes.c_char * 128)]
+    _fields_ = [
+        ("x", _vp),
+        ("y", _vp),
+        ("zl", _vp),
+        ("zu", _vp),
+        ("objective", _dbl),
+        ("status", _i64),
+        ("iterations", _i64),
+        ("solver_status", ctypes.c_char * 128),
+    ]
 
 
 @dataclass
@@ -45,13 +83,14 @@ class Result:
     """A solve: the cnlp status (`solved`, `acceptable`, `infeasible`, ...), the objective,
     the iteration count, the solution and multipliers (cnlp sign convention), and the
     solver's name, own status and device."""
+
     status: str
     objective: float
     iterations: int
     solution: np.ndarray
     multipliers: np.ndarray
-    multipliers_L: np.ndarray
-    multipliers_U: np.ndarray
+    multipliers_lower: np.ndarray
+    multipliers_upper: np.ndarray
     solver: str
     solver_status: str
     device: str
@@ -62,7 +101,7 @@ class Solver:
     """A cnlp solver library, loaded. `name` is a solver installed in the store (installed
     there with `cnlp install` when it is not) or a path to its library."""
 
-    def __init__(self, name):
+    def __init__(self, name: str) -> None:
         if os.sep in name:
             path = name
         else:
@@ -80,22 +119,28 @@ class Solver:
         fn = self._lib.cnlp_solver_name
         fn.restype, fn.argtypes = _i64, [ctypes.POINTER(ctypes.c_uint8), _i64]
         n = int(fn(buf, 63))
-        self.name = bytes(buf[:max(n, 0)]).decode()
+        self.name = bytes(buf[: max(n, 0)]).decode()
         self._solve = self._lib.cnlp_solve
         self._solve.restype = _i64
         self._solve.argtypes = [ctypes.POINTER(_Problem), _i64, _vp, _vp, ctypes.POINTER(_Result)]
         try:
             self._solve_d = self._lib.cnlp_solve_device
             self._solve_d.restype = _i64
-            self._solve_d.argtypes = [ctypes.POINTER(_Problem), ctypes.POINTER(_DeviceProblem), _i64,
-                                      _vp, _vp, ctypes.POINTER(_Result)]
+            self._solve_d.argtypes = [
+                ctypes.POINTER(_Problem),
+                ctypes.POINTER(_DeviceProblem),
+                _i64,
+                _vp,
+                _vp,
+                ctypes.POINTER(_Result),
+            ]
         except AttributeError:
             self._solve_d = None
 
     def __repr__(self):
         return f"cnlplib.Solver({self.name!r}{', cpu and cuda' if self._solve_d else ''})"
 
-    def solve(self, model, x0=None, **options):
+    def solve(self, model: CModel, x0: Any = None, **options: Any) -> Result:
         """Solve `model` (a `CModel`) where it lives: on the GPU for a model created with
         `backend="cuda"`, on the host otherwise. `x0` replaces the starting point; other
         keywords are solver options (`tol=1e-8`, `max_iter=100`)."""
@@ -106,16 +151,36 @@ class Solver:
 
         on_device = model.backend == "cuda"
         if on_device and self._solve_d is None:
-            raise ValueError(f"the model is on the GPU (backend='cuda') and {self.name} does not "
-                             "run there: use a GPU solver (cumadnlp), or a model on the host")
+            raise ValueError(
+                f"the model is on the GPU (backend='cuda') and {self.name} does not "
+                "run there: use a GPU solver (cumadnlp), or a model on the host"
+            )
         n, m = model.nvar, model.ncon
         x0 = np.ascontiguousarray(model.x0 if x0 is None else _host(x0), dtype=np.float64)
         keep = [x0, model.lvar, model.uvar, model.lcon, model.ucon]
-        ptr = lambda a: a.ctypes.data
-        p = _Problem(_vp(mid), n, m, model.nnzj, model.nnzh, 1 if model.minimize else 0,
-                     *(ptr(a) for a in keep), None, None, None,
-                     fp("obj"), fp("grad"), fp("cons"), fp("jac_structure"), fp("jac"),
-                     fp("hess_structure"), fp("hess"))
+
+        def ptr(a):
+            return a.ctypes.data
+
+        p = _Problem(
+            _vp(mid),
+            n,
+            m,
+            model.nnzj,
+            model.nnzh,
+            1 if model.minimize else 0,
+            *(ptr(a) for a in keep),
+            None,
+            None,
+            None,
+            fp("obj"),
+            fp("grad"),
+            fp("cons"),
+            fp("jac_structure"),
+            fp("jac"),
+            fp("hess_structure"),
+            fp("hess"),
+        )
         out = [np.zeros(n), np.zeros(m), np.zeros(n), np.zeros(n)]
         r = _Result(*(ptr(a) for a in out), 0.0, 6, -1, b"")
         keys = [str(k).encode() for k in options]
@@ -124,33 +189,50 @@ class Solver:
         t = time.perf_counter()
         if on_device:
             d = _DeviceProblem(1, fp("obj_d"), fp("grad_d"), fp("cons_d"), fp("jac_d"), fp("hess_d"))
-            rc = self._solve_d(ctypes.byref(p), ctypes.byref(d), len(keys), ctypes.cast(ka, _vp),
-                               ctypes.cast(va, _vp), ctypes.byref(r))
+            rc = self._solve_d(
+                ctypes.byref(p),
+                ctypes.byref(d),
+                len(keys),
+                ctypes.cast(ka, _vp),
+                ctypes.cast(va, _vp),
+                ctypes.byref(r),
+            )
         else:
-            rc = self._solve(ctypes.byref(p), len(keys), ctypes.cast(ka, _vp), ctypes.cast(va, _vp), ctypes.byref(r))
+            rc = self._solve(
+                ctypes.byref(p), len(keys), ctypes.cast(ka, _vp), ctypes.cast(va, _vp), ctypes.byref(r)
+            )
         seconds = time.perf_counter() - t
         msg = r.solver_status.decode(errors="replace")
         if rc != 0:
             raise RuntimeError(f"{self.name} failed: {msg}")
-        if on_device:       # the solution where the model lives
+        if on_device:  # the solution where the model lives
             out = [model._xp.asarray(a) for a in out]
-        return Result(status=_STATUS[r.status if 0 <= r.status <= 6 else 6], objective=r.objective,
-                      iterations=int(r.iterations), solution=out[0], multipliers=out[1],
-                      multipliers_L=out[2], multipliers_U=out[3], solver=self.name, solver_status=msg,
-                      device="cuda" if on_device else "cpu", seconds=seconds)
+        return Result(
+            status=_STATUS[r.status if 0 <= r.status <= 6 else 6],
+            objective=r.objective,
+            iterations=int(r.iterations),
+            solution=out[0],
+            multipliers=out[1],
+            multipliers_lower=out[2],
+            multipliers_upper=out[3],
+            solver=self.name,
+            solver_status=msg,
+            device="cuda" if on_device else "cpu",
+            seconds=seconds,
+        )
 
 
 _SOLVERS = {}
 
 
-def load_solver(name):
+def load_solver(name: str) -> Solver:
     """The cnlp solver `name`, loaded once per process (see `Solver`)."""
     if name not in _SOLVERS:
         _SOLVERS[name] = Solver(name)
     return _SOLVERS[name]
 
 
-def solve(model, solver="ipopt", x0=None, **options):
+def solve(model: CModel, solver: str = "ipopt", x0: Any = None, **options: Any) -> Result:
     """Solve `model` (a `CModel`) with the cnlp solver `solver`, in this process, where the
     model lives (its `backend`); the solver is loaded on first use and kept. See `Solver.solve`.
 
