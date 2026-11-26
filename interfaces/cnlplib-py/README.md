@@ -11,6 +11,7 @@ pip install "cnlplib @ git+https://github.com/madsuite-org/cnlplib#subdirectory=
 
 ```python
 import cnlplib
+
 m = cnlplib.CModel("@emp", "acp", "pglib_opf_case118_ieee")
 r = cnlplib.solve(m, solver="madnlp")
 ```
