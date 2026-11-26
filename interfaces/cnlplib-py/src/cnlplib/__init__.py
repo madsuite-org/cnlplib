@@ -453,9 +453,13 @@ class CModel:
     columns), checked against the kind and type the schema declares. A lone integer or
     string goes to the model's own entry point when it has one; no arguments instantiate a
     model that takes none. Any number of instances may coexist per library.
+
+    `backend="cuda"` evaluates through the library's device tier (its CUDA build): `obj`,
+    `grad`, `cons`, `jac` and `hess` take and return CuPy arrays. The bounds, starting point
+    and structures stay NumPy arrays on the host.
     """
 
-    def __init__(self, lib, *args, prefix=None):
+    def __init__(self, lib, *args, prefix=None, backend=None):
         spec_prefix = None
         if isinstance(lib, str):
             spec_prefix = _default_prefix(lib)
@@ -507,6 +511,9 @@ class CModel:
         _check(self._fn["meta"](self._id, _arr(self.x0), _arr(self.lvar),
                                 _arr(self.uvar), _arr(self.lcon), _arr(self.ucon)),
                "meta")
+        self.backend = backend
+        if backend is not None:
+            self._bind_device(backend)
         # the objective sense is optional in the ABI: a library without it minimizes
         try:
             mn = _f(lib, prefix, "minimize", [_c_int])
@@ -515,25 +522,72 @@ class CModel:
         else:
             self.minimize = int(mn(self._id)) != 0
 
+    def _bind_device(self, backend):
+        if backend != "cuda":
+            raise ValueError(f"backend is None (the host) or 'cuda', not {backend!r}")
+        try:
+            import cupy
+        except ImportError:
+            raise ImportError("backend='cuda' needs CuPy (pip install cupy-cuda12x)") from None
+        try:
+            dev = _f(self._lib, self._prefix, "device", [_c_int])
+        except AttributeError:
+            raise ValueError(f"{self._prefix!r} has no device tier: install the library's "
+                             "CUDA build") from None
+        if int(dev(self._id)) != 1:
+            raise ValueError(f"{self._prefix}_device reports no CUDA memory space")
+        self._xp = cupy
+        for name, argtypes in (
+            ("obj", [_c_int, ctypes.c_void_p, _pd]),
+            ("grad", [_c_int, ctypes.c_void_p, ctypes.c_void_p]),
+            ("cons", [_c_int, ctypes.c_void_p, ctypes.c_void_p]),
+            ("jac", [_c_int, ctypes.c_void_p, ctypes.c_void_p]),
+            ("hess", [_c_int, ctypes.c_void_p, ctypes.c_void_p, _c_dbl, ctypes.c_void_p]),
+        ):
+            self._fn[name] = _f(self._lib, self._prefix, name + "_d", argtypes)
+
     def _x(self, x):
-        x = np.ascontiguousarray(x, dtype=np.float64)
+        if self.backend is not None:
+            x = self._xp.ascontiguousarray(x, dtype=self._xp.float64)
+        else:
+            x = np.ascontiguousarray(x, dtype=np.float64)
         if x.shape != (self.nvar,):
             raise ValueError(f"x must have shape ({self.nvar},), got {x.shape}")
         return x
 
+    # the pointer a callback takes, and a new output array, where the model evaluates
+    def _p(self, a):
+        if self.backend is None:
+            return _arr(a)
+        return ctypes.c_void_p(a.data.ptr)
+
+    def _out(self, n, out):
+        if out is not None:
+            return out
+        return self._xp.zeros(n) if self.backend is not None else np.zeros(n)
+
+    def _sync(self):
+        # the library works on the legacy default stream; finish this thread's stream first
+        if self.backend is not None:
+            self._xp.cuda.get_current_stream().synchronize()
+
     def obj(self, x):
         out = _c_dbl(0.0)
-        _check(self._fn["obj"](self._id, _arr(self._x(x)), ctypes.byref(out)), "obj")
+        x = self._x(x)
+        self._sync()
+        _check(self._fn["obj"](self._id, self._p(x), ctypes.byref(out)), "obj")
         return out.value
 
     def grad(self, x, out=None):
-        g = out if out is not None else np.zeros(self.nvar)
-        _check(self._fn["grad"](self._id, _arr(self._x(x)), _arr(g)), "grad")
+        x, g = self._x(x), self._out(self.nvar, out)
+        self._sync()
+        _check(self._fn["grad"](self._id, self._p(x), self._p(g)), "grad")
         return g
 
     def cons(self, x, out=None):
-        c = out if out is not None else np.zeros(self.ncon)
-        _check(self._fn["cons"](self._id, _arr(self._x(x)), _arr(c)), "cons")
+        x, c = self._x(x), self._out(self.ncon, out)
+        self._sync()
+        _check(self._fn["cons"](self._id, self._p(x), self._p(c)), "cons")
         return c
 
     def _structure(self, name, nnz):
@@ -546,21 +600,54 @@ class CModel:
         return self._structure("jac_structure", self.nnzj)
 
     def jac(self, x, out=None):
-        v = out if out is not None else np.zeros(self.nnzj)
-        _check(self._fn["jac"](self._id, _arr(self._x(x)), _arr(v)), "jac")
+        x, v = self._x(x), self._out(self.nnzj, out)
+        self._sync()
+        _check(self._fn["jac"](self._id, self._p(x), self._p(v)), "jac")
         return v
 
     def hess_structure(self):
         return self._structure("hess_structure", self.nnzh)
 
     def hess(self, x, y, obj_weight=1.0, out=None):
-        y = np.ascontiguousarray(y, dtype=np.float64)
+        xp = self._xp if self.backend is not None else np
+        y = xp.ascontiguousarray(y, dtype=xp.float64)
         if y.shape != (self.ncon,):
             raise ValueError(f"y must have shape ({self.ncon},), got {y.shape}")
-        v = out if out is not None else np.zeros(self.nnzh)
-        _check(self._fn["hess"](self._id, _arr(self._x(x)), _arr(y),
-                                _c_dbl(float(obj_weight)), _arr(v)), "hess")
+        x, v = self._x(x), self._out(self.nnzh, out)
+        self._sync()
+        _check(self._fn["hess"](self._id, self._p(x), self._p(y),
+                                _c_dbl(float(obj_weight)), self._p(v)), "hess")
         return v
+
+    # ── Reports (cnlp.h, the reports tier) ─────────────────────────────────────
+
+    def report_instance(self):
+        """The library's text about this instance (what it was built from, its size), or
+        "" when the library has none."""
+        try:
+            fn = _f(self._lib, self._prefix, "report_instance", [_c_int, _pu8, _c_int])
+        except AttributeError:
+            return ""
+        return _copyout(fn, self._id)
+
+    def report_solution(self, x, y=None, zl=None, zu=None, objective=None, status=""):
+        """The library's text about a solution (for an optimal power flow, the generation
+        cost and the constraint violations by group), or "" when the library has none.
+        Host arrays; multipliers in the cnlp sign convention (formats/solution.md), zeros
+        when not given; `objective` defaults to f(x)."""
+        try:
+            fn = _f(self._lib, self._prefix, "report_solution",
+                    [_c_int, _pd, _pd, _pd, _pd, _c_dbl, ctypes.c_char_p, _pu8, _c_int])
+        except AttributeError:
+            return ""
+        host = lambda v, n: np.zeros(n) if v is None else np.ascontiguousarray(
+            v.get() if hasattr(v, "get") else v, dtype=np.float64)
+        x = host(x, self.nvar)
+        y, zl, zu = host(y, self.ncon), host(zl, self.nvar), host(zu, self.nvar)
+        if objective is None:
+            objective = self.obj(x if self.backend is None else self._xp.asarray(x))
+        return _copyout(fn, self._id, _arr(x), _arr(y), _arr(zl), _arr(zu),
+                        _c_dbl(float(objective)), str(status).encode())
 
     # ── Named blocks ─────────────────────────────────────────────────────────
 

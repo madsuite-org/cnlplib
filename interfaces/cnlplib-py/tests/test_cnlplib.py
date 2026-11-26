@@ -436,3 +436,13 @@ def test_string_instantiation(lib):
     # The library's own refusal (unparsable string) surfaces as an error.
     with pytest.raises(RuntimeError, match="ps_new_str"):
         cnlplib.CModel(lib, "not-a-number", prefix="ps")
+
+
+def test_reports_are_empty_for_a_library_without_them(m):
+    assert m.report_instance() == ""
+    assert m.report_solution(np.zeros(4)) == ""
+
+
+def test_backend_is_none_or_cuda(lib):
+    with pytest.raises(ValueError, match="'cuda'"):
+        cnlplib.CModel(lib, 4, prefix="tq", backend="tpu")
