@@ -58,7 +58,7 @@ cnlp list | grep -q 'cpu' && ok "cnlp list shows backends" || bad "cnlp list sho
 [ "$(cnlp list | grep -c '^  cnlptest ')" = 1 ] && cnlp list | grep '^  cnlptest ' | grep -q 'latest' && ok "cnlp list has one row per library, with what is installed" || bad "cnlp list rows: $(cnlp list)"
 cnlp install cnlptest 2>&1 | grep -q 'up to date' && ok "a second install is a no-op" || bad "a second install is a no-op"
 L=$CNLPLIB_HOME/lib/cnlptest/lib
-P=$(ls "$L" | grep -E '^c[0-9a-z]{2}cnlpdep\.so\.1$')
+P=$(grep -aoE 'c[0-9a-z]{2}cnlpdep\.so\.1' "$L/libcnlptest.so" | head -n 1)   # the name it asks for
 [ -n "$P" ] && [ -L "$L/$P" ] && grep -q "$P" "$L/libcnlptest.so" && ! grep -q 'libcnlpdep.so.1' "$L/libcnlptest.so" \
     && grep -q "$P" "$L/libcnlpdep.so.1" && ok "the library's own libraries get private names ($P), with a link under each" \
     || bad "private names: $(ls -l "$L")"
