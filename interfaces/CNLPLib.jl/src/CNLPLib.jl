@@ -53,6 +53,7 @@ export CNLPModel, argtype, available_models, restore_blas!, schema_json, set_pat
     readers, default_reader, read_start, read_parameters!
 
 include("patchversion.jl")
+include("registry.jl")
 include("private_runtime.jl")
 
 """
@@ -100,16 +101,23 @@ end
 
 Resolve `lib<name>.<dlext>` against the search path ([`set_path!`](@ref) /
 `CNLPLIB_PATH`) — also accepting `<dir>/lib/lib<name>.<dlext>`, the layout
-`compile_library` produces — load it, and cache the handle by name.
+`compile_library` produces — then among the libraries the `cnlp` command installed
+(`\$CNLPLIB_HOME/lib`, by default `~/.cnlplib/lib`), and otherwise in the cnlplib registry,
+installed there on first use ([`install`](@ref)); load it, and cache the handle by name.
+`name@nightly` takes the registry's nightly build.
 """
 function lib(name::AbstractString)
     get!(_LIBS, String(name)) do
-        fname = "lib" * name * "." * Libdl.dlext
-        for d in _paths(), cand in (joinpath(d, fname), joinpath(d, name, "lib", fname), joinpath(d, "lib", fname))
-            isfile(cand) && return load(cand)
+        base = first(split(name, '@'))   # `emp@nightly`: the registry's channel
+        fname = "lib" * base * "." * Libdl.dlext
+        if base == name
+            for d in _paths(), cand in (joinpath(d, fname), joinpath(d, name, "lib", fname), joinpath(d, "lib", fname))
+                isfile(cand) && return load(cand)
+            end
         end
-        error("library $fname not found on the CNLPLib path " *
-              "($(isempty(_paths()) ? "empty — call set_path! or set CNLPLIB_PATH" : join(_paths(), ':')))")
+        # installed in $CNLPLIB_HOME (by the `cnlp` command, or by this package), else
+        # installed there now from the cnlplib registry
+        return load(_registry_lib(name))
     end
 end
 
@@ -379,7 +387,8 @@ function _instantiate(lib::CLib, prefix::AbstractString, args::Tuple)
         p === nothing && error(
             "`$prefix` has no string entry point (`$(prefix)_new_str`); its " *
             "signature is `" * _argtype(lib, prefix) * "`")
-        id = ccall(p, Int64, (Cstring,), String(args[1]))
+        # a data-set file by name, as `cnlp solve` takes one; any other string as given
+        id = ccall(p, Int64, (Cstring,), _string_arg(args[1]))
         id > 0 || _status_error(Symbol(prefix, "_new_str"), id)
         return id
     end
@@ -665,7 +674,7 @@ end
 _is_name(spec::AbstractString) = startswith(spec, "@")
 
 _default_prefix(spec::AbstractString) =
-    _is_name(spec) ? String(spec[2:end]) : _prefix_from_path(spec)
+    _is_name(spec) ? String(first(split(spec[2:end], '@'))) : _prefix_from_path(spec)
 
 # `librosen.so` → `rosen`; a bundle directory or a file not following the
 # `lib<name>` convention keeps its stem, and `prefix=` remains the override

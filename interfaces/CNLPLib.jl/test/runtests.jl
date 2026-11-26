@@ -101,7 +101,10 @@ end
     m = CNLPModel("@toyqp", 4; prefix = "tq") # name-based construction
     @test m.meta.nvar == 4
     @test cnlp"toyqp" === l                      # the string-literal shortcut
-    @test_throws ErrorException CNLPLib.lib("nonexistent")
+    # not found anywhere: the registry (a local, empty index) has no such library either
+    withenv("CNLPLIB_INDEX" => "file://" * (f = tempname(); write(f, ""); f)) do
+        @test_throws ErrorException CNLPLib.lib("nonexistent")
+    end
 end
 
 @testset "arguments are positional, one per schema field" begin
@@ -491,3 +494,4 @@ end
 end
 include("solver.jl")
 include("callbacks.jl")
+include("registry.jl")

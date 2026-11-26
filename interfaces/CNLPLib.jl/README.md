@@ -25,6 +25,19 @@ m = CNLPModel("@mymodel", 1000)            # resolves libmymodel.so, instance of
 res = ipopt(m)
 ```
 
+**Libraries from the [cnlplib registry](https://cnlplib.madsuite.org/registry/)** need no
+separate install step: a name that is neither on the path nor installed is installed on first
+use, into `$CNLPLIB_HOME` (default `~/.cnlplib`) exactly as `cnlp install` would, with the
+data sets it requires, after checking it against the SHA-256 its release publishes. One copy
+serves the `cnlp` command, Julia and Python, and is found offline afterwards. The library's
+CUDA build is taken on a machine with an NVIDIA GPU (`CNLPLIB_DEVICE=cpu` takes the host
+build). `name@nightly` is the nightly build; `CNLPLib.update!("lv")` fetches a newer release.
+
+```julia
+m = CNLPModel("@lv@nightly", :wood, 10000)
+m = CNLPModel("@emp@nightly", :acp, "pglib_opf_case118_ieee")   # a data-set file, by name
+```
+
 The `cnlp"..."` literal is the shortcut onto the path — it resolves the
 name, checks that the library exists and loads, and hands back the cached
 handle, directly usable as the library argument:
