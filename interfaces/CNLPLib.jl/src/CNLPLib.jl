@@ -35,6 +35,14 @@ export CNLPModel, argtype, available_models, restore_blas!, schema_json, set_pat
     report_instance, report_solution,
     readers, default_reader, read_start, read_parameters!
 
+# documented API that is not exported (reached as `CNLPLib.name`)
+@static if VERSION >= v"1.11"
+    eval(Meta.parse("public CNLPError, CLib, BlockRef, lib, load, install, update!, data_file, " *
+                    "ProblemModel, CNLPProblem, CNLPResult, CNLPDeviceProblem, CallbackError, " *
+                    "problem, device_problem, set_result!, set_failure!, solver_options, serve, " *
+                    "copyout, blas_state, CompileTrace"))
+end
+
 include("patchversion.jl")
 include("registry.jl")
 include("private_runtime.jl")
@@ -145,7 +153,7 @@ end
 
 A model instance of a cnlp library as an `AbstractNLPModel{Float64, VT}`. `VT` is where
 the solver's vectors live: `Vector{Float64}` on the host, a GPU vector type for a model
-built with `device = ...` (the evaluation pointers are then the library's device tier).
+built with `backend = CUDABackend()` (the evaluation pointers are then the library's device tier).
 Structure, layout, parameters, readers and writers are instance state and work the same
 for every `VT`.
 """
@@ -253,8 +261,18 @@ function _read_layout_strict(lib::CLib, prefix::AbstractString, id::Int64, nb::P
     return (NamedTuple(vars), NamedTuple(cons), NamedTuple(pars))
 end
 
-@noinline _status_error(sym, st) =
-    error("$sym returned nonzero status $st")
+"""
+    CNLPError(msg)
+
+A cnlp library refused an operation: one of its functions returned a failure status, or it
+reported its data inconsistent. Arguments the library cannot take are an `ArgumentError`.
+"""
+struct CNLPError <: Exception
+    msg::String
+end
+Base.showerror(io::IO, e::CNLPError) = print(io, "CNLPError: ", e.msg)
+
+@noinline _status_error(sym, st) = throw(CNLPError("$sym returned nonzero status $st"))
 
 @inline function _check(st::Int64, sym::Symbol)
     st == 0 || _status_error(sym, st)
@@ -280,7 +298,7 @@ schema_json(lib::CLib, model::Symbol) = schema_json(lib; prefix = String(model))
 function _schema_field_names(json::AbstractString)
     names = String[]
     r = findfirst("\"fields\"", json)
-    r === nothing && error("library schema has no \"fields\" array")
+    r === nothing && throw(CNLPError("library schema has no \"fields\" array"))
     depth = 0
     i = last(r)
     while i < lastindex(json)
@@ -316,9 +334,9 @@ end
 function _instantiate(lib::CLib, prefix::AbstractString, args::Tuple)
     if length(args) == 1 && args[1] isa AbstractString
         p = Libdl.dlsym(lib.handle, Symbol(prefix, "_new_str"); throw_error = false)
-        p === nothing && error(
+        p === nothing && throw(ArgumentError(
             "`$prefix` has no string entry point (`$(prefix)_new_str`); its " *
-            "signature is `" * _argtype(lib, prefix) * "`")
+            "signature is `" * _argtype(lib, prefix) * "`"))
         # a data-set file by name, as `cnlp solve` takes one; any other string as given
         id = ccall(p, Int64, (Cstring,), _string_arg(args[1]))
         id > 0 || _status_error(Symbol(prefix, "_new_str"), id)
@@ -348,14 +366,14 @@ end
 # by the library several calls later.
 function _bind(lib::CLib, prefix::AbstractString, args::Tuple)
     Libdl.dlsym(lib.handle, Symbol(prefix, "_data_begin"); throw_error = false) === nothing &&
-        error("this library has no builder surface: it instantiates from a " *
-              "single integer, `CNLPModel(lib, n)`")
+        throw(ArgumentError("this library has no builder surface: it instantiates from a " *
+                            "single integer, `CNLPModel(lib, n)`"))
     names = _schema_field_names(schema_json(lib; prefix = prefix))
-    length(names) == length(args) || error(
+    length(names) == length(args) || throw(ArgumentError(
         "given $(length(args)) argument$(length(args) == 1 ? "" : "s") but the " *
         "library's schema declares $(length(names)) field" *
         "$(length(names) == 1 ? "" : "s")" *
-        (isempty(names) ? "" : ": " * join(names, ", ")))
+        (isempty(names) ? "" : ": " * join(names, ", "))))
     return NamedTuple{Tuple(Symbol.(names))}(args)
 end
 
@@ -380,8 +398,8 @@ function _push_field(fp, sym, b, f, val::AbstractVector{<:NamedTuple})
     end
 end
 _push_field(fp, sym, b, f, val) =
-    error("unsupported field $f::$(typeof(val)): fields must be numbers, " *
-          "numeric vectors, or vectors of named tuples of numbers")
+    throw(ArgumentError("unsupported field $f::$(typeof(val)): fields must be numbers, " *
+                        "numeric vectors, or vectors of named tuples of numbers"))
 
 _push_col(fp, sym, b, f, c, col::AbstractVector{<:AbstractFloat}) =
     _check(ccall(fp(:set_col_f64), Int64, (Int64, Cstring, Cstring, Ptr{Cdouble}, Int64),
@@ -390,7 +408,7 @@ _push_col(fp, sym, b, f, c, col::AbstractVector{<:Integer}) =
     _check(ccall(fp(:set_col_i64), Int64, (Int64, Cstring, Cstring, Ptr{Clonglong}, Int64),
         b, f, c, convert(Vector{Int64}, col), Int64(length(col))), sym(:set_col_i64))
 _push_col(fp, sym, b, f, c, col) =
-    error("unsupported column type $(eltype(col)) for $f.$c")
+    throw(ArgumentError("unsupported column type $(eltype(col)) for $f.$c"))
 
 function _fill_data(lib::CLib, prefix::AbstractString, data::NamedTuple)
     sym(s) = Symbol(prefix, "_", s)
@@ -401,7 +419,7 @@ function _fill_data(lib::CLib, prefix::AbstractString, data::NamedTuple)
         _push_field(fp, sym, b, string(fname), val)
     end
     ccall(fp(:data_ready), Int64, (Int64,), b) == 1 ||
-        error("library reports data incomplete or inconsistent after all fields were set")
+        throw(CNLPError("library reports data incomplete or inconsistent after all fields were set"))
     id = ccall(fp(:new_from_data), Int64, (Int64,), b)
     id > 0 || _status_error(sym(:new_from_data), id)
     return id
@@ -529,7 +547,8 @@ function CNLPModel(
     lib::CLib, model::Symbol, args...; name::AbstractString = String(model), kwargs...,
 )
     # naming the model and passing `prefix=` are the same knob: not both
-    haskey(kwargs, :prefix) && throw(MethodError(CNLPModel, (lib, model, args...)))
+    haskey(kwargs, :prefix) &&
+        throw(ArgumentError("name the model either as `$(repr(model))` or with `prefix =`, not both"))
     _require_model(lib, model)
     return CNLPModel(lib, args...; prefix = String(model), name = name, kwargs...)
 end
@@ -537,8 +556,8 @@ end
 # `_nvar` is the witness: the ABI requires it of every model however it is instantiated.
 function _require_model(lib::CLib, model::Symbol)
     Libdl.dlsym(lib.handle, Symbol(model, "_nvar"); throw_error = false) === nothing &&
-        error("library $(lib.path) carries no model named `$model` " *
-              "(it exports no `$(model)_nvar`)")
+        throw(ArgumentError("library $(lib.path) carries no model named `$model` " *
+                            "(it exports no `$(model)_nvar`)"))
     return nothing
 end
 
@@ -567,9 +586,9 @@ function _resolve_path(spec::AbstractString)
         for cand in (joinpath(spec, "lib", fname), joinpath(spec, fname))
             isfile(cand) && return abspath(cand)
         end
-        error("no shared library in $spec (tried lib/$fname and $fname)")
+        throw(ArgumentError("no shared library in $spec (tried lib/$fname and $fname)"))
     end
-    error("no shared library at $spec")
+    throw(ArgumentError("no shared library at $spec"))
 end
 
 # Cached with the name-resolved libraries: absolute paths cannot collide with names.
@@ -772,6 +791,14 @@ function NLPModels.hess_structure!(m::CNLPModel, rows::AbstractVector{<:Integer}
     return rows, cols
 end
 
+# all constraints are nonlinear: the `_nln` Jacobian is the Jacobian
+NLPModels.jac_nln_structure!(m::CNLPModel, rows::AbstractVector{<:Integer}, cols::AbstractVector{<:Integer}) =
+    NLPModels.jac_structure!(m, rows, cols)
+function NLPModels.jac_nln_coord!(m::CNLPModel, x::AbstractVector{Float64}, vals::AbstractVector{Float64})
+    increment!(m, :neval_jac_nln)
+    return NLPModels.jac_coord!(m, x, vals)
+end
+
 function NLPModels.jac_coord!(m::CNLPModel, x::AbstractVector{Float64}, vals::AbstractVector{Float64})
     @lencheck m.meta.nvar x
     @lencheck m.meta.nnzj vals
@@ -819,7 +846,7 @@ function _sym_mul!(y, rows, cols, vals, v)
     return y
 end
 
-for (fn, inc) in ((:jprod_nln!, :neval_jprod), (:jprod!, :neval_jprod))
+for (fn, inc) in ((:jprod_nln!, :neval_jprod_nln), (:jprod!, :neval_jprod))
     @eval function NLPModels.$fn(m::CNLPModel, x::AbstractVector{Float64}, v::AbstractVector{Float64},
                                  Jv::AbstractVector{Float64})
         @lencheck m.meta.nvar x v
@@ -830,7 +857,7 @@ for (fn, inc) in ((:jprod_nln!, :neval_jprod), (:jprod!, :neval_jprod))
     end
 end
 
-for (fn, inc) in ((:jtprod_nln!, :neval_jtprod), (:jtprod!, :neval_jtprod))
+for (fn, inc) in ((:jtprod_nln!, :neval_jtprod_nln), (:jtprod!, :neval_jtprod))
     @eval function NLPModels.$fn(m::CNLPModel, x::AbstractVector{Float64}, v::AbstractVector{Float64},
                                  Jtv::AbstractVector{Float64})
         @lencheck m.meta.nvar x Jtv
@@ -894,7 +921,7 @@ function write_solution(m::CNLPModel, writer::Symbol, path::AbstractString,
     fp = Libdl.dlsym(m.lib.handle, Symbol(m.prefix, "_write_", writer))
     st = ccall(fp, Int64, (Int64, Cstring, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Cdouble, Cstring),
                m.id, path, _host(x), _host(y), _host(zl), _host(zu), Cdouble(objective), status)
-    st == 0 || error("writer `$writer` of `$(m.prefix)` could not write $path (status $st)")
+    st == 0 || throw(CNLPError("writer `$writer` of `$(m.prefix)` could not write $path (status $st)"))
     return path
 end
 
@@ -1055,7 +1082,7 @@ function _instantiate_reader(lib::CLib, prefix::AbstractString, name::Symbol, pa
     _reader_of_kind(lib, prefix, name, :instance)
     fp = Libdl.dlsym(lib.handle, Symbol(prefix, "_new_from_", name))
     id = ccall(fp, Int64, (Cstring,), path)
-    id > 0 || error("`$(prefix)_new_from_$(name)` could not create an instance from $path")
+    id > 0 || throw(CNLPError("`$(prefix)_new_from_$(name)` could not create an instance from $path"))
     return id
 end
 

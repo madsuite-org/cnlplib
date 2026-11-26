@@ -77,8 +77,8 @@ A name that matches no file is an error that lists the files whose names contain
 function data_file(name::AbstractString)
     f, near = _find_data(name)
     f === nothing || return f
-    error("no file `$name`: not a path, and no installed data-set file of that name" *
-          (isempty(near) ? "" : "; did you mean: " * join(near, ", ")))
+    throw(ArgumentError("no file `$name`: not a path, and no installed data-set file of that name" *
+                        (isempty(near) ? "" : "; did you mean: " * join(near, ", "))))
 end
 
 # the data-set file `name`, or nothing with the names that contain it

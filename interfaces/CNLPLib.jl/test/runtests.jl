@@ -17,7 +17,7 @@ run(`$cc -shared -fPIC -O2 -I$ROOT -o $LIBPATH $(joinpath(FIXDIR, "tinyqp.c"))`)
     lib = CNLPLib.load(LIBPATH)
 
     @testset "init failure surfaces" begin
-        @test_throws ErrorException CNLPModel(lib, 1; prefix = "tq")
+        @test_throws CNLPLib.CNLPError CNLPModel(lib, 1; prefix = "tq")
     end
 
     @testset "storage type" begin
@@ -140,18 +140,18 @@ end
 
     # Order is load-bearing: the same values in the wrong order are refused by
     # the library's own setters (s is f64-only, w is the array field).
-    @test_throws ErrorException CNLPModel(lib, s, n, w; prefix = "sq")
+    @test_throws CNLPLib.CNLPError CNLPModel(lib, s, n, w; prefix = "sq")
 
     # Wrong arity names the schema rather than reaching the builder.
-    @test_throws ErrorException CNLPModel(lib, 4, 2.0; prefix = "sq")
-    @test_throws ErrorException CNLPModel(lib, 5, 6; prefix = "tq")
+    @test_throws ArgumentError CNLPModel(lib, 4, 2.0; prefix = "sq")
+    @test_throws ArgumentError CNLPModel(lib, 5, 6; prefix = "tq")
     # No arguments at all is the no-instance-data case; both schemas want some.
-    @test_throws ErrorException CNLPModel(lib; prefix = "tq")
-    @test_throws ErrorException CNLPModel(lib; prefix = "sq")
+    @test_throws ArgumentError CNLPModel(lib; prefix = "tq")
+    @test_throws ArgumentError CNLPModel(lib; prefix = "sq")
     # A value that cannot cross the boundary is reported as such.
-    @test_throws ErrorException CNLPModel(lib, "five"; prefix = "tq")
+    @test_throws ArgumentError CNLPModel(lib, "five"; prefix = "tq")
     # Inconsistent structured data is the library's own call to make.
-    @test_throws ErrorException CNLPModel(lib, 4, 2.0, [1.0, 2.0]; prefix = "sq")
+    @test_throws CNLPLib.CNLPError CNLPModel(lib, 4, 2.0, [1.0, 2.0]; prefix = "sq")
 end
 
 @testset "several models in one library, selected by name" begin
@@ -196,7 +196,7 @@ end
     @test_throws "carries no model named `nosuch`" CNLPModel(lib, :nosuch, 4)
     @test_throws "carries no model named `nosuch`" CNLPModel(lib, :nosuch)
     # naming the model and passing `prefix=` are the same knob
-    @test_throws MethodError CNLPModel(lib, :tq, 4; prefix = "sq")
+    @test_throws ArgumentError CNLPModel(lib, :tq, 4; prefix = "sq")
 end
 
 @testset "a fixed library needs no arguments" begin
@@ -305,6 +305,10 @@ end
     @test jtprod(m, x, y) ≈ J' * y
     @test NLPModels.jprod_nln!(m, x, v, zeros(1)) ≈ J * v
     @test NLPModels.jtprod_nln!(m, x, y, zeros(4)) ≈ J' * y
+    # every constraint is nonlinear: the `_nln` Jacobian is the Jacobian
+    @test NLPModels.jac_nln_structure(m) == (rows, cols)
+    @test NLPModels.jac_nln_coord(m, x) == vals
+    @test neval_jac_nln(m) == 1
 end
 
 @testset "unbundled juliac libraries are detected by their libjulia NEEDED" begin
