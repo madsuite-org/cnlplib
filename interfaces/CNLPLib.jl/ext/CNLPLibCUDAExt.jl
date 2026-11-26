@@ -9,7 +9,7 @@ the pointer conversion, the stream handoff, and the product kernels.
 module CNLPLibCUDAExt
 
 using CNLPLib, NLPModels, CUDACore
-using CUDACore: CuVector, StridedCuVector
+using CUDACore: CuArray, CuVector, StridedCuVector
 using CNLPLib: CNLPModel
 import Libdl
 
@@ -46,6 +46,40 @@ function CNLPLib._device_model(::Val{:cuda}, m::CNLPModel{Vector{Float64}})
         m.jrows, m.jcols, m.hrows, m.hcols,
         CuVector(m.jrows), CuVector(m.jcols), CuVector(m.hrows), CuVector(m.hcols),
         VT(undef, hm.nnzj), VT(undef, hm.nnzh), CUDACore.zeros(Float64, hm.ncon),
+        m.prefix, m.vars, m.cons, m.pars,
+    )
+end
+
+# ── the precompilation model on the device (src/precompile.jl), for CNLPLibcuMadNLPExt ──
+# Its callbacks take device pointers, as a library's device tier does; the toy copies to the
+# host and back, which is all precompilation needs.
+_dw(p, n) = unsafe_wrap(CuArray, reinterpret(CUDACore.CuPtr{Float64}, UInt(p)), n)
+_put(p, v) = (copyto!(_dw(p, length(v)), v); Int64(0))
+_d_obj(::Int64, x::Ptr{Cdouble}, f::Ptr{Cdouble}) =
+    (v = Array(_dw(x, 2)); GC.@preserve v CNLPLib._toy_obj(Int64(1), pointer(v), f))
+_d_grad(::Int64, x::Ptr{Cdouble}, g::Ptr{Cdouble}) = (v = Array(_dw(x, 2)); _put(g, [2(v[1] - 1), 2(v[2] - 2)]))
+_d_cons(::Int64, x::Ptr{Cdouble}, c::Ptr{Cdouble}) = _put(c, [sum(Array(_dw(x, 2)))])
+_d_jac(::Int64, ::Ptr{Cdouble}, v::Ptr{Cdouble}) = _put(v, [1.0, 1.0])
+_d_hess(::Int64, ::Ptr{Cdouble}, ::Ptr{Cdouble}, w::Cdouble, v::Ptr{Cdouble}) = _put(v, [2w, 2w])
+
+function _toy_device_model()
+    m = CNLPLib._toy_model()
+    hm = m.meta
+    meta = NLPModelMeta(
+        hm.nvar; ncon = hm.ncon, nnzj = hm.nnzj, nnzh = hm.nnzh,
+        x0 = CuVector(hm.x0), lvar = CuVector(hm.lvar), uvar = CuVector(hm.uvar),
+        y0 = CuVector(hm.y0), lcon = CuVector(hm.lcon), ucon = CuVector(hm.ucon), name = hm.name,
+    )
+    return CNLPModel(
+        meta, Counters(), m.lib, m.id,
+        @cfunction(_d_obj, Int64, (Int64, Ptr{Cdouble}, Ptr{Cdouble})),
+        @cfunction(_d_grad, Int64, (Int64, Ptr{Cdouble}, Ptr{Cdouble})),
+        @cfunction(_d_cons, Int64, (Int64, Ptr{Cdouble}, Ptr{Cdouble})),
+        @cfunction(_d_jac, Int64, (Int64, Ptr{Cdouble}, Ptr{Cdouble})),
+        @cfunction(_d_hess, Int64, (Int64, Ptr{Cdouble}, Ptr{Cdouble}, Cdouble, Ptr{Cdouble})),
+        m.jrows, m.jcols, m.hrows, m.hcols,
+        CuVector(m.jrows), CuVector(m.jcols), CuVector(m.hrows), CuVector(m.hcols),
+        CUDACore.zeros(Float64, hm.nnzj), CUDACore.zeros(Float64, hm.nnzh), CUDACore.zeros(Float64, hm.ncon),
         m.prefix, m.vars, m.cons, m.pars,
     )
 end

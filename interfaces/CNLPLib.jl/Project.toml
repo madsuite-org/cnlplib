@@ -4,6 +4,7 @@ version = "0.4.0"
 authors = ["Sungho Shin <sushin@mit.edu>"]
 
 [deps]
+PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
 Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Mmap = "a63ad114-7e13-5084-954f-fe012c677804"
@@ -14,14 +15,24 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 StructIO = "53d494c1-5632-5724-8f4c-31dff12d585f"
 
 [weakdeps]
+MadNLP = "2621e9c9-9eb4-46b1-8089-e8c72242dfb6"
+NLPModelsIpopt = "f4238b75-b362-5c4c-b852-0801c9a21d71"
+cuMadNLP = "0bc90ec8-66ae-4354-8e1d-92c57c2bd2b2"
 CUDACore = "bd0ed864-bdfe-4181-a5ed-ce625a5fdea2"
 HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 
 [extensions]
+CNLPLibMadNLPExt = "MadNLP"
+CNLPLibNLPModelsIpoptExt = "NLPModelsIpopt"
+CNLPLibcuMadNLPExt = ["cuMadNLP", "CUDACore"]
 CNLPLibCUDAExt = "CUDACore"
 CNLPLibHDF5Ext = "HDF5"
 
 [compat]
+MadNLP = "0.11, 0.12"
+NLPModelsIpopt = "0.11"
+PrecompileTools = "1"
+cuMadNLP = "0.12"
 SHA = "0.7, 1"
 CUDACore = "6"
 HDF5 = "0.17"

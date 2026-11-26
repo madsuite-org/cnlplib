@@ -25,6 +25,7 @@ module CNLPLib
 
 using Libdl
 using LinearAlgebra
+using PrecompileTools: @setup_workload, @compile_workload
 import NLPModels: NLPModels, AbstractNLPModel, NLPModelMeta, Counters,
     increment!, @lencheck
 
@@ -1097,5 +1098,6 @@ module PrecompileStatements
 end
 
 include("solver.jl")
+include("precompile.jl")
 
 end # module CNLPLib
