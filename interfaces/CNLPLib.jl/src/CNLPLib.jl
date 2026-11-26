@@ -1096,8 +1096,12 @@ end
 # statements of a first load and construction (precompile_statements.jl; a statement naming
 # something a dependency no longer has is skipped).
 let M = CNLPModel{Vector{Float64}, Vector{Int}}, V = Vector{Float64}, W = NamedTuple{(:obj_weight,), Tuple{Float64}}
-    precompile(CNLPModel, (CLib, Symbol, Int))
-    precompile(CNLPModel, (CLib, Int))
+    # the constructor for the usual argument lists: a library or registry name, a model, and
+    # an integer size or a data-set name
+    for L in (CLib, String), args in ((Int,), (Symbol, Int), (Symbol, Int, Int), (Symbol, String),
+                                      (Symbol, String, String), (Symbol,), ())
+        precompile(CNLPModel, (L, args...))
+    end
     precompile(Core.kwcall, (NamedTuple{(:prefix,), Tuple{String}}, Type{CNLPModel}, CLib, Int))
     for (f, args) in (
         (NLPModels.obj, (M, V)), (NLPModels.grad, (M, V)), (NLPModels.grad!, (M, V, V)),
