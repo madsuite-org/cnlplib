@@ -40,7 +40,10 @@ export CNLPModel, argtype, available_models, schema_json, set_path!,
     eval(Meta.parse("public CNLPError, CLib, BlockRef, lib, load, install, update!, data_file, " *
                     "ProblemModel, CNLPProblem, CNLPResult, CNLPDeviceProblem, CallbackError, " *
                     "problem, device_problem, set_result!, set_failure!, solver_options, serve, " *
-                    "copyout, blas_state, restore_blas!, CompileTrace"))
+                    "copyout, blas_state, restore_blas!, CompileTrace, ModelProblem, " *
+                    "start_multipliers, tracing, report, compile_ns, CNLP_SOLVED, CNLP_ACCEPTABLE, " *
+                    "CNLP_INFEASIBLE, CNLP_UNBOUNDED, CNLP_ITERATION_LIMIT, CNLP_TIME_LIMIT, " *
+                    "CNLP_ERROR, CNLP_SOLVER_VERSION, CNLP_DEVICE_CUDA"))
 end
 
 include("patchversion.jl")
@@ -75,6 +78,7 @@ Set the library search path used by name-based loading (`CNLPLib.lib("acopf")`,
 function set_path!(dirs::AbstractString...)
     empty!(_PATHS)
     append!(_PATHS, String.(dirs))
+    empty!(_LIBS)   # a name may resolve elsewhere now
     return copy(_PATHS)
 end
 
@@ -132,12 +136,7 @@ Re-forward the host's libblastrampoline to the BLAS/LAPACK libraries that were
 active before `lib` was loaded. Idempotent; called automatically by
 [`CNLPModel`](@ref) after the library's first call.
 """
-function restore_blas!(lib::CLib)
-    for (i, l) in enumerate(lib.blas_libs)
-        BLAS.lbt_forward(l; clear = (i == 1))
-    end
-    return lib
-end
+restore_blas!(lib::CLib) = (restore_blas!(lib.blas_libs); lib)
 
 """
     CNLPModel{VT}
@@ -356,7 +355,10 @@ end
 # Positional arguments against the schema's field order, checked for arity here rather than
 # by the library several calls later.
 function _bind(lib::CLib, prefix::AbstractString, args::Tuple)
+    # a prefix that exports nothing names no model; one with a model but no builder
+    # instantiates from a single integer
     Libdl.dlsym(lib.handle, Symbol(prefix, "_data_begin"); throw_error = false) === nothing &&
+        (_require_model(lib, Symbol(prefix)); true) &&
         throw(ArgumentError("this library has no builder surface: it instantiates from a " *
                             "single integer, `CNLPModel(lib, n)`"))
     names = _schema_field_names(schema_json(lib; prefix = prefix))
@@ -784,13 +786,17 @@ NLPModels.jac_nln_structure!(m::CNLPModel, rows::AbstractVector{<:Integer}, cols
     NLPModels.jac_structure!(m, rows, cols)
 function NLPModels.jac_nln_coord!(m::CNLPModel, x::AbstractVector{Float64}, vals::AbstractVector{Float64})
     increment!(m, :neval_jac_nln)
-    return NLPModels.jac_coord!(m, x, vals)
+    return _jac!(m, x, vals)
 end
 
 function NLPModels.jac_coord!(m::CNLPModel, x::AbstractVector{Float64}, vals::AbstractVector{Float64})
+    increment!(m, :neval_jac)
+    return _jac!(m, x, vals)
+end
+
+function _jac!(m::CNLPModel, x::AbstractVector{Float64}, vals::AbstractVector{Float64})
     @lencheck m.meta.nvar x
     @lencheck m.meta.nnzj vals
-    increment!(m, :neval_jac)
     m.meta.nnzj == 0 && return vals
     _sync(m)
     _check(ccall(m.jac_p, Int64, (Int64, Ptr{Cdouble}, Ptr{Cdouble}), m.id, _ptr(x), _ptr(vals)), :jac)

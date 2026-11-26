@@ -62,6 +62,21 @@ end
             @test err isa CallbackError && err.name == :obj && err.status == 7
         end
 
+        @testset "a start in the cnlp sign convention" begin
+            Y, ZL, ZU = [2.0], [1.0, 1.5], [0.5, 0.25]
+            for (minimize, s) in ((1, 1.0), (0, -1.0))
+                q, gs = the_problem(minimize)
+                f = Any[getfield(q, k) for k in fieldnames(CNLPProblem)]
+                f[12:14] = [pointer(Y), pointer(ZL), pointer(ZU)]   # y0, zl0, zu0
+                GC.@preserve gs Y ZL ZU begin
+                    pm = ProblemModel(CNLPProblem(f...))
+                    @test pm.meta.y0 == s .* Y
+                    @test CNLPLib.start_multipliers(pm) == (s .* ZL, s .* ZU)
+                end
+            end
+            @test CNLPLib.start_multipliers(m) === nothing
+        end
+
         @testset "the result in the cnlp sign convention" begin
             for (minimize, s) in ((1, 1.0), (0, -1.0))
                 q, gs = the_problem(minimize)

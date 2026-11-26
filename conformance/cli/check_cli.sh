@@ -63,6 +63,9 @@ P=$(grep -aoE 'c[0-9a-z]{2}cnlpdep\.so\.1' "$L/libcnlptest.so" | head -n 1)   # 
     && grep -q "$P" "$L/libcnlpdep.so.1" && ok "the library's own libraries get private names ($P), with a link under each" \
     || bad "private names: $(ls -l "$L")"
 cnlp-solve --privatize | grep -q . && bad "giving private names twice changes something" || ok "giving private names again changes nothing"
+T="$CNLPLIB_HOME/.privatize"   # one prefix per library directory, recorded, none shared
+[ -s "$T" ] && [ -z "$(cut -f1 "$T" | sort | uniq -d)" ] && grep -q "$(printf '%s' "$P" | cut -c1-3)	lib/cnlptest/lib" "$T" \
+    && ok "each library directory has its own prefix, recorded in the store" || bad "prefix table: $(cat "$T" 2>&1)"
 
 # ── cnlp solve ───────────────────────────────────────────────────────────────────
 h5() {   # FILE FIELD -> value

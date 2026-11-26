@@ -151,8 +151,12 @@ def _carries_model(lib, name):
 
 
 def _takes_string(lib, prefix):
-    """Whether the model under `prefix` instantiates from a string, per its signature."""
-    return argtype(lib, prefix).split("|")[0].split(",")[0] == "string"
+    """Whether the model under `prefix` instantiates from a string: per its signature, or,
+    for a library that publishes none, by its string entry point."""
+    sig = argtype(lib, prefix)
+    if not sig:
+        return hasattr(lib, f"{prefix}_new_str")
+    return sig.split("|")[0].split(",")[0] == "string"
 
 
 def _require_model(lib, model):
@@ -260,6 +264,9 @@ def _bind(lib, prefix, args):
     """Positional arguments against the schema's field order, checked for arity here
     rather than by the library several calls later."""
     if not hasattr(lib, f"{prefix}_data_begin"):
+        # a prefix that exports nothing names no model; one with a model but no builder
+        # instantiates from a single integer
+        _require_model(lib, prefix)
         raise RuntimeError(
             "this library has no builder surface: it instantiates from a single integer, CModel(lib, n)"
         )
@@ -411,7 +418,8 @@ class Blocks(Mapping):
 
 
 def _shaped(v, b):
-    return v.reshape(b.dims) if len(b.dims) > 1 else v
+    # blocks are column-major (formats/README.md), as Julia stores arrays
+    return v if len(b.dims) == 1 else v.reshape(b.dims, order="F")
 
 
 def _slice(vec, b):
@@ -748,7 +756,7 @@ class CModel:
         """Update a parameter block's values (`m["w"] = v`), for every later evaluation of
         this instance."""
         b = self._par_block(block)
-        v = np.ascontiguousarray(np.ravel(values), dtype=np.float64)
+        v = np.ascontiguousarray(np.ravel(values, order="F"), dtype=np.float64)
         if v.size != b.length:
             raise ValueError(f"parameter {b.name!r} has {b.length} elements, got {v.size}")
         fn = _f(self._lib, self._prefix, "set_value", [_c_int, _c_int, _pd, _c_int])

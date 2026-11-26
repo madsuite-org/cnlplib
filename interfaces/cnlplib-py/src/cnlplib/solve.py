@@ -25,7 +25,7 @@ from . import registry
 if TYPE_CHECKING:
     from .model import CModel
 
-__all__ = ["Result", "load_solver", "solve"]
+__all__ = ["Result", "Solver", "load_solver", "solve"]
 
 _i64, _dbl, _vp = ctypes.c_int64, ctypes.c_double, ctypes.c_void_p
 _STATUS = ("solved", "acceptable", "infeasible", "unbounded", "iteration_limit", "time_limit", "error")

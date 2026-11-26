@@ -104,6 +104,8 @@ end
     l = CNLPLib.lib("toyqp")
     @test l isa CNLPLib.CLib
     @test CNLPLib.lib("toyqp") === l          # cached by name
+    CNLPLib.set_path!(mdir)                    # setting the path again: names resolve afresh
+    @test !haskey(CNLPLib._LIBS, "toyqp")
     m = CNLPModel("@toyqp", 4; prefix = "tq") # name-based construction
     @test m.meta.nvar == 4
     # not found anywhere: the registry (a local, empty index) has no such library either
@@ -305,8 +307,9 @@ end
     @test NLPModels.jtprod_nln!(m, x, y, zeros(4)) ≈ J' * y
     # every constraint is nonlinear: the `_nln` Jacobian is the Jacobian
     @test NLPModels.jac_nln_structure(m) == (rows, cols)
+    nj = neval_jac(m)
     @test NLPModels.jac_nln_coord(m, x) == vals
-    @test neval_jac_nln(m) == 1
+    @test neval_jac_nln(m) == 1 && neval_jac(m) == nj   # counted once, as the nonlinear one
 end
 
 @testset "unbundled juliac libraries are detected by their libjulia NEEDED" begin

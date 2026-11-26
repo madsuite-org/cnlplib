@@ -146,7 +146,10 @@ function ProblemModel(p::CNLPProblem)
     meta = NLPModelMeta(
         n; ncon = m, nnzj = Int(p.nnzj), nnzh = Int(p.nnzh),
         x0 = vec(p.x0, n), lvar = vec(p.lvar, n), uvar = vec(p.uvar, n),
-        y0 = vec(p.y0, m), lcon = vec(p.lcon, m), ucon = vec(p.ucon, m), minimize = p.minimize != 0,
+        # a starting y in the cnlp sign convention, as set_result! writes it (NLPModels flips it
+        # for a maximization)
+        y0 = (p.minimize != 0 ? 1 : -1) .* vec(p.y0, m), lcon = vec(p.lcon, m), ucon = vec(p.ucon, m),
+        minimize = p.minimize != 0,
     )
     jr, jc = _read_structure(p, p.jac_structure, meta.nnzj, :jac_structure)
     hr, hc = _read_structure(p, p.hess_structure, meta.nnzh, :hess_structure)
@@ -174,12 +177,14 @@ _psync(::ProblemModel) = nothing   # the device extension synchronizes before a 
 """
     start_multipliers(m::ProblemModel) -> (zl, zu) or nothing
 
-The problem's starting bound multipliers (`zl0`, `zu0`), on the host, when it gives them.
+The problem's starting bound multipliers (`zl0`, `zu0`), on the host, when it gives them,
+in the NLPModels sign convention (the cnlp ones negated for a maximization, as `set_result!`
+negates them on the way out).
 """
 function start_multipliers(m::ProblemModel)
     (m.p.zl0 == C_NULL || m.p.zu0 == C_NULL) && return nothing
-    n = m.meta.nvar
-    return copy(unsafe_wrap(Array, m.p.zl0, n)), copy(unsafe_wrap(Array, m.p.zu0, n))
+    n, s = m.meta.nvar, m.meta.minimize ? 1 : -1
+    return s .* unsafe_wrap(Array, m.p.zl0, n), s .* unsafe_wrap(Array, m.p.zu0, n)
 end
 
 function NLPModels.obj(m::ProblemModel, x::AbstractVector{Float64})

@@ -18,7 +18,10 @@
  * Scopes: each directory of $CNLPLIB_HOME/artifacts (a shared runtime), and each installed
  * library's or solver's lib/ (its own files, and the links its lib/julia makes into a runtime).
  * A name is renamed after the directory its file actually lives in, so a library and the
- * runtime it links agree, and two runtimes never share a name.
+ * runtime it links agree. Two directories never share a prefix: the prefix chosen for each is
+ * kept in $CNLPLIB_HOME/.privatize (prefix, then directory under the store, per line), and a
+ * new directory whose first choice is taken gets the next free one, so a prefix, once given,
+ * stays with its directory across installs.
  */
 #include <fcntl.h>
 #include <ftw.h>
@@ -37,14 +40,46 @@ static void pv_push(pv_list* l, const char* s) {
 static pv_list PV_FILES, PV_NAMES, PV_PREFIX, PV_ENTRIES;
 static int PV_LINKS;
 
-/* three characters for a directory, from its path under the store (stable if the store moves) */
+/* the prefixes given so far, and the directory (under the store) each belongs to */
+static pv_list PV_TAB_PRE, PV_TAB_DIR;
+static void pv_table_path(char* out, size_t n) { snprintf(out, n, "%s/.privatize", home_dir()); }
+static void pv_table_load(void) {
+    char path[PATH_MAX]; pv_table_path(path, sizeof path);
+    FILE* f = fopen(path, "r"); if (!f) return;
+    char line[PATH_MAX + 8];
+    while (fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\n")] = 0;
+        char* tab = strchr(line, '\t');
+        if (!tab || tab - line != 3) continue;
+        *tab = 0; pv_push(&PV_TAB_PRE, line); pv_push(&PV_TAB_DIR, tab + 1);
+    }
+    fclose(f);
+}
+static void pv_table_save(void) {
+    char path[PATH_MAX], tmp[PATH_MAX + 16]; pv_table_path(path, sizeof path);
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE* f = fopen(tmp, "w"); if (!f) die("cannot write %s", tmp);
+    for (int k = 0; k < PV_TAB_PRE.n; k++) fprintf(f, "%s\t%s\n", PV_TAB_PRE.v[k], PV_TAB_DIR.v[k]);
+    if (fclose(f) || rename(tmp, path)) die("cannot write %s", path);
+}
+/* three characters for a directory: the one it was given before, else the first free one of a
+ * sequence seeded by its path under the store (stable if the store moves) */
 static void pv_prefix(const char* dir, char out[4]) {
     const char* h = home_dir(); size_t L = strlen(h);
     const char* rel = !strncmp(dir, h, L) && dir[L] == '/' ? dir + L + 1 : dir;
+    for (int k = 0; k < PV_TAB_DIR.n; k++)
+        if (!strcmp(PV_TAB_DIR.v[k], rel)) { memcpy(out, PV_TAB_PRE.v[k], 4); return; }
     uint64_t x = 1469598103934665603ULL;
     for (const char* c = rel; *c; c++) { x ^= (unsigned char)*c; x *= 1099511628211ULL; }
     static const char A[] = "0123456789abcdefghijklmnopqrstuvwxyz";
-    out[0] = 'c'; out[1] = A[x % 36]; out[2] = A[(x / 36) % 36]; out[3] = 0;
+    for (int i = 0; i < 36 * 36; i++) {
+        uint64_t y = (x + (uint64_t)i) % (36 * 36);
+        out[0] = 'c'; out[1] = A[y % 36]; out[2] = A[y / 36]; out[3] = 0;
+        int taken = 0;
+        for (int k = 0; k < PV_TAB_PRE.n && !taken; k++) taken = !strcmp(PV_TAB_PRE.v[k], out);
+        if (!taken) { pv_push(&PV_TAB_PRE, out); pv_push(&PV_TAB_DIR, rel); return; }
+    }
+    die("no private prefix left for %s (the store has %d library directories)", rel, PV_TAB_PRE.n);
 }
 static const char* pv_lookup(const char* name) {
     for (int k = 0; k < PV_NAMES.n; k++) if (!strcmp(PV_NAMES.v[k], name)) return PV_PREFIX.v[k];
@@ -200,11 +235,13 @@ static void pv_subdirs(pv_list* dirs, const char* kind, const char* sub) {
 static int privatize(int nargs, char** args) {
     (void)args;
     if (nargs) die("--privatize takes no arguments: it works on the whole store ($CNLPLIB_HOME)");
+    pv_table_load();
     pv_list dirs = { 0 };
     pv_subdirs(&dirs, "artifacts", ""); pv_subdirs(&dirs, "lib", "/lib"); pv_subdirs(&dirs, "solvers", "/lib");
     int changed = 0;
     for (int k = 0; k < dirs.n; k++) changed += pv_scope(dirs.v[k]);
     pv_links();
+    pv_table_save();
     if (changed || PV_LINKS) printf("Gave the bundled libraries private names (%d files, %d links)\n", changed, PV_LINKS);
     return 0;
 }

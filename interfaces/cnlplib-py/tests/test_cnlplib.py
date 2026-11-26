@@ -444,3 +444,16 @@ def test_reports_are_empty_for_a_library_without_them(m):
 def test_backend_is_none_or_cuda(lib):
     with pytest.raises(ValueError, match="'cuda'"):
         cnlplib.CModel(lib, 4, prefix="tq", backend="tpu")
+
+
+def test_blocks_are_column_major():
+    # formats/README.md: a block of dims (2, 3) is stored first index fastest, as in Julia
+    b = cnlplib.BlockRef("v", "var", 1, 6, (2, 3), 1)
+    x = np.arange(8.0)  # the block is x[1:7]
+    assert cnlplib.solution(x, b).tolist() == [[1.0, 3.0, 5.0], [2.0, 4.0, 6.0]]
+    assert cnlplib.solution(x, cnlplib.BlockRef("s", "var", 3, 1, (), 1)).shape == ()
+
+
+def test_an_unknown_prefix_is_named(lib):
+    with pytest.raises(ValueError, match="carries no model named 'nosuch'"):
+        cnlplib.CModel(lib, 4, 2.0, prefix="nosuch")
