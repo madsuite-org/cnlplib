@@ -971,8 +971,8 @@ end
 _to_cnlp_signs(m::CNLPModel, y, zl, zu) =
     m.meta.minimize ? (y, zl, zu) : (-Array(y), -Array(zl), -Array(zu))
 
-# ── the standard solution format (cnlp-solution 0.2: formats/solution.md), HDF5, written
-# by the HDF5 extension ──────────────────────────────────────────────────────────────
+# ── the standard solution format (cnlp-solution 0.2: formats/solution.md), written and
+# read by libcnlpio (cnlpio.h), which the cnlp command and the Python cnlplib use too ─────
 
 # Solver statuses (MadNLP, SolverCore) mapped to the solver-neutral ones.
 const _STATUS = Dict(
@@ -984,40 +984,40 @@ const _STATUS = Dict(
 )
 _status(s) = get(_STATUS, string(s), "error")
 
-# c(x) through the host callback, whatever VT the model evaluates on.
-function _host_cons(m::CNLPModel, x::Vector{Float64})
-    c = zeros(m.meta.ncon)
-    m.meta.ncon == 0 && return c
-    fp = Libdl.dlsym(m.lib.handle, Symbol(m.prefix, "_cons"))
-    _check(ccall(fp, Int64, (Int64, Ptr{Cdouble}, Ptr{Cdouble}), m.id, x, c), Symbol(m.prefix, "_cons"))
-    return c
+# libcnlpio, installed with the cnlp command; CNLPIO_LIB names another build
+const _CNLPIO = Ref{Ptr{Cvoid}}(C_NULL)
+function _cnlpio(f::Symbol)
+    if _CNLPIO[] == C_NULL
+        path = get(ENV, "CNLPIO_LIB", joinpath(_home(), "lib", "libcnlpio.so"))
+        isfile(path) || throw(ArgumentError(
+            "the standard solution file needs libcnlpio ($path), installed with the cnlp command: " *
+            "curl -fsSL https://cnlplib.madsuite.org/install | sh"))
+        _CNLPIO[] = Libdl.dlopen(path)
+    end
+    return Libdl.dlsym(_CNLPIO[], f)
+end
+function _cnlpio_check(rc, err)
+    rc == 0 || throw(CNLPError(unsafe_string(pointer(err))))
+    return nothing
 end
 
-# The solution as plain host data, organized by the library's named blocks.
-function _solution_record(m::CNLPModel, result)
-    x = _host(result.solution)
-    y, zl, zu = map(_host, _to_cnlp_signs(m, result.multipliers, result.multipliers_L, result.multipliers_U))
-    c = _host_cons(m, x)
-    sl(v, b) = collect(_block(v, b))
-    blocks = Tuple{String,String,Vector{Pair{String,Array{Float64}}}}[]
-    for (name, b) in pairs(variables(m))
-        push!(blocks, ("variables", String(name), ["value" => sl(x, b),
-            "multiplier_L" => sl(zl, b), "multiplier_U" => sl(zu, b)]))
-    end
-    for (name, b) in pairs(constraints(m))
-        push!(blocks, ("constraints", String(name), ["value" => sl(c, b), "multiplier" => sl(y, b)]))
-    end
-    for (name, b) in pairs(parameters(m))
-        push!(blocks, ("parameters", String(name), ["value" => value(m, b)]))
-    end
-    return (; library = basename(m.lib.path), model = m.prefix, nvar = m.meta.nvar, ncon = m.meta.ncon,
-            minimize = m.meta.minimize, objective = Float64(result.objective),
-            status = _status(result.status), solver_status = string(result.status),
-            iterations = hasproperty(result, :iter) ? Int(result.iter) : -1, x, y, zl, zu, blocks)
+# the standard file, with the model's named blocks (libcnlpio queries the library for them)
+function _write_cnlp(m::CNLPModel, path::AbstractString, result)
+    x = Vector{Float64}(_host(result.solution))
+    y, zl, zu = map(v -> Vector{Float64}(_host(v)),
+                    _to_cnlp_signs(m, result.multipliers, result.multipliers_L, result.multipliers_U))
+    iters = hasproperty(result, :iter) ? Int64(result.iter) : Int64(-1)
+    err = zeros(UInt8, 512)
+    rc = ccall(_cnlpio(:cnlpio_write_solution), Int64,
+               (Cstring, Ptr{Cvoid}, Cstring, Cstring, Int64, Int64, Int64, Int64,
+                Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Float64, Cstring, Int64,
+                Cstring, Cstring, Ptr{UInt8}, Int64),
+               path, m.lib.handle, m.lib.path, m.prefix, m.id, m.meta.nvar, m.meta.ncon, Int64(m.meta.minimize),
+               x, y, zl, zu, Float64(result.objective), _status(result.status), iters,
+               "", string(result.status), err, Int64(length(err)))
+    _cnlpio_check(rc, err)
+    return path
 end
-
-# `_write_standard(path, record)` is defined by the HDF5 extension.
-function _write_standard end
 
 # The writer the library names as its default for this model, or `nothing`.
 function default_writer(m::CNLPModel)
@@ -1032,14 +1032,14 @@ end
 
 Write a solution in the model's default format: the library's default writer if it
 names one (e.g. a MATPOWER case), otherwise the standard cnlp-solution format (HDF5,
-needs `using HDF5`). `format` forces `:cnlp` (the standard format) or one of
+written by libcnlpio, which the cnlp command installs). `format` forces `:cnlp` (the
+standard format) or one of
 [`writers`](@ref).
 """
 function write_solution(m::CNLPModel, path::AbstractString, result; format::Union{Nothing,Symbol} = nothing)
     f = format !== nothing ? format : something(default_writer(m), :cnlp)
     f === :cnlp || return write_solution(m, f, path, result)
-    isempty(methods(_write_standard)) && throw(ArgumentError("the standard solution format needs HDF5: `using HDF5`"))
-    return _write_standard(path, _solution_record(m, result))
+    return _write_cnlp(m, path, result)
 end
 
 # ── readers: the model's own input formats (the readers tier) ─────────────────────
@@ -1106,6 +1106,24 @@ function read_start(m::CNLPModel, reader::Symbol, path::AbstractString)
     fp = Libdl.dlsym(m.lib.handle, Symbol(m.prefix, "_start_from_", reader))
     _check(ccall(fp, Int64, (Int64, Cstring, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}),
                  m.id, path, x0, y0, zl, zu), Symbol(m.prefix, "_start_from_", reader))
+    y0, zl, zu = _to_cnlp_signs(m, y0, zl, zu)   # its own inverse
+    return (; x0, y0, zl, zu)
+end
+
+"""
+    read_start(m, path) -> (; x0, y0, zl, zu)
+
+A starting point from a cnlp-solution file (another solve of this model, by `cnlp solve`,
+Julia or Python), as [`read_start`](@ref)`(m, reader, path)` returns one.
+"""
+function read_start(m::CNLPModel, path::AbstractString)
+    n, k = m.meta.nvar, m.meta.ncon
+    x0, y0, zl, zu = zeros(n), zeros(k), zeros(n), zeros(n)
+    err = zeros(UInt8, 512)
+    rc = ccall(_cnlpio(:cnlpio_read_start), Int64,
+               (Cstring, Int64, Int64, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{UInt8}, Int64),
+               path, n, k, x0, y0, zl, zu, err, Int64(length(err)))
+    _cnlpio_check(rc, err)
     y0, zl, zu = _to_cnlp_signs(m, y0, zl, zu)   # its own inverse
     return (; x0, y0, zl, zu)
 end

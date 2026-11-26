@@ -52,10 +52,12 @@ madnlp(m)
 ### Solutions and model formats
 
 `write_solution(m, path, result)` writes a solver result as a
-[cnlp-solution](../../formats/solution.md) HDF5 file (`using HDF5`), or with the model's
-default writer if it names one. Multipliers are converted to the cnlp sign convention for
-maximizing models. A library's own formats are reachable by name: `writers(m)`,
-`write_solution(m, :matpower, path, result)`, `readers(lib, :acopf)`,
+[cnlp-solution](../../formats/solution.md) file, or with the model's default writer if it
+names one; `read_start(m, path)` reads one back as a start. Multipliers are converted to the
+cnlp sign convention for maximizing models. The standard file is written and read by
+libcnlpio, which the `cnlp` command installs and Python and `cnlp solve` use too, so the
+file is the same from all three. A library's own formats are reachable by name:
+`writers(m)`, `write_solution(m, :matpower, path, result)`, `readers(lib, :acopf)`,
 `CNLPModel(lib, :acopf; input = :matpower => "case.m")`, `read_start(m, :matpower, path)`,
 `read_parameters!(m, :name, path)`.
 

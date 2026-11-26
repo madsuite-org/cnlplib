@@ -9,7 +9,7 @@ using PrecompileTools: @setup_workload, @compile_workload
 function _precompile_result(R)
     M = CNLPLib.CNLPModel{Vector{Float64}, Vector{Int}}
     precompile(CNLPLib.report_solution, (M, R))
-    precompile(CNLPLib._solution_record, (M, R))
+    precompile(CNLPLib._write_cnlp, (M, String, R))
     precompile(CNLPLib.write_solution, (M, String, R))
 end
 

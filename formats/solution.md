@@ -45,7 +45,8 @@ readers convert (measured on HS71, both senses):
 ## 3. Use
 
 With no format given, a consumer writes with the model's `P_default_writer` if it has one,
-otherwise this format.
+otherwise this format. [cnlpio.h](../cnlpio.h) writes and reads it (libcnlpio, installed with
+the `cnlp` command), for any consumer.
 
 A solution read against a model gives a warm start (`x`, `y`, `zL`, `zU`); its `nvar` and
 `ncon` must match the model's. Further checks are the consumer's.

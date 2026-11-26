@@ -14,16 +14,19 @@ if [ ! -f "$W/hdf5/lib/libhdf5.a" ]; then
     curl -fsSL -o "$W/hdf5.tar.gz" "https://github.com/HDFGroup/hdf5/releases/download/hdf5_$H5V/hdf5-$H5V.tar.gz"
     tar -xzf "$W/hdf5.tar.gz" -C "$W"
     cmake -S "$W/hdf5-$H5V" -B "$W/hdf5-build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$W/hdf5" \
-        -DBUILD_SHARED_LIBS=OFF -DHDF5_BUILD_TOOLS=OFF -DHDF5_BUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF \
+        -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DHDF5_BUILD_TOOLS=OFF -DHDF5_BUILD_EXAMPLES=OFF -DBUILD_TESTING=OFF \
         -DHDF5_BUILD_HL_LIB=OFF -DHDF5_BUILD_FORTRAN=OFF -DHDF5_BUILD_CPP_LIB=OFF \
         -DHDF5_ENABLE_Z_LIB_SUPPORT=OFF -DHDF5_ENABLE_SZIP_SUPPORT=OFF > "$W/hdf5-cmake.log"
     cmake --build "$W/hdf5-build" -j "$(nproc)" > "$W/hdf5-build.log"
     cmake --install "$W/hdf5-build" > /dev/null
 fi
 # the driver
-D=$W/stage/cnlp-solve; rm -rf "$D"; mkdir -p "$D/bin"
+D=$W/stage/cnlp-solve; rm -rf "$D"; mkdir -p "$D/bin" "$D/lib"
 cc -std=c99 -O2 -Wall -Wextra -Wno-format-truncation -I"$ROOT" -I"$W/hdf5/include" -o "$D/bin/cnlp-solve" \
     "$ROOT/solve/cnlp-solve.c" "$W/hdf5/lib/libhdf5.a" -ldl -lm -lpthread
+# libcnlpio, the solution file for Julia and Python (cnlpio.h), with HDF5 linked in
+cc -std=c99 -O2 -Wall -Wextra -fPIC -shared -I"$ROOT" -I"$W/hdf5/include" -o "$D/lib/libcnlpio.so" \
+    "$ROOT/solve/cnlpio.c" "$W/hdf5/lib/libhdf5.a" -Wl,--exclude-libs,ALL -ldl -lm -lpthread   # HDF5 kept private
 cp "$ROOT/LICENSE" "$D/LICENSE"
 printf 'cnlp-solve links HDF5 %s statically: BSD-3-Clause, https://github.com/HDFGroup/hdf5\n' "$H5V" > "$D/THIRD_PARTY_NOTICES"
 tar -C "$W/stage" -czf "$OUT/cnlp-solve-$PLAT.tar.gz" cnlp-solve

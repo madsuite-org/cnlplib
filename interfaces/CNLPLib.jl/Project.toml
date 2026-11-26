@@ -15,14 +15,12 @@ MadNLP = "2621e9c9-9eb4-46b1-8089-e8c72242dfb6"
 NLPModelsIpopt = "f4238b75-b362-5c4c-b852-0801c9a21d71"
 cuMadNLP = "0bc90ec8-66ae-4354-8e1d-92c57c2bd2b2"
 CUDACore = "bd0ed864-bdfe-4181-a5ed-ce625a5fdea2"
-HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 
 [extensions]
 CNLPLibMadNLPExt = "MadNLP"
 CNLPLibNLPModelsIpoptExt = "NLPModelsIpopt"
 CNLPLibcuMadNLPExt = ["cuMadNLP", "CUDACore"]
 CNLPLibCUDAExt = "CUDACore"
-CNLPLibHDF5Ext = "HDF5"
 
 [compat]
 MadNLP = "0.11, 0.12"
@@ -32,6 +30,7 @@ cuMadNLP = "0.12"
 SHA = "0.7, 1"
 CUDACore = "6"
 HDF5 = "0.17"
+HDF5_jll = "1.14"
 Libdl = "1"
 LinearAlgebra = "1"
 Mmap = "1"
@@ -39,10 +38,11 @@ NLPModels = "0.21"
 julia = "1.10"
 
 [extras]
+HDF5_jll = "0234f1f7-429e-5d53-9886-15a909be8d59"
 SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 MadNLP = "2621e9c9-9eb4-46b1-8089-e8c72242dfb6"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["HDF5", "MadNLP", "SHA", "Test"]
+test = ["HDF5", "HDF5_jll", "MadNLP", "SHA", "Test"]

@@ -12,6 +12,20 @@ const LIBPATH = joinpath(mktempdir(), "libtinyqp.so")
 cc = something(Sys.which("cc"), Sys.which("gcc"), Sys.which("clang"))
 @test cc !== nothing
 run(`$cc -shared -fPIC -O2 -I$ROOT -o $LIBPATH $(joinpath(FIXDIR, "tinyqp.c"))`)
+# libcnlpio (solve/cnlpio.c), against HDF5_jll's libhdf5, as the solution-file library
+import HDF5_jll
+let h5 = dirname(HDF5_jll.libhdf5_path), lib = joinpath(mktempdir(), "libcnlpio.so")
+    # HDF5_jll is a parallel build: its headers include the mpi.h of the MPI it loaded
+    incs = [joinpath(HDF5_jll.artifact_dir, "include")]
+    for m in values(Base.loaded_modules)
+        endswith(string(nameof(m)), "_jll") && isdefined(m, :artifact_dir) || continue
+        d = joinpath(m.artifact_dir, "include")
+        isfile(joinpath(d, "mpi.h")) && push!(incs, d)
+    end
+    run(`$cc -std=c99 -O2 -fPIC -shared -I$ROOT $(map(d -> "-I" * d, incs))
+         -o $lib $(joinpath(ROOT, "solve", "cnlpio.c")) -L$h5 -lhdf5 -Wl,-rpath,$h5`)
+    ENV["CNLPIO_LIB"] = lib
+end
 
 @testset "CNLPLib" begin
     lib = CNLPLib.load(LIBPATH)
@@ -447,7 +461,28 @@ end
         @test maximum(abs, σ .* grad(m, x) .+ jtprod(m, x, y) .- zl .+ zu) < 1e-6
         @test minimum(zl) >= 0 && minimum(zu) >= 0
         @test haskey(f, "blocks/variables/x")             # tq names its variable x
+        @test read(f["blocks/variables/x/value"]) == x
+        @test haskey(f, "blocks/constraints/budget/multiplier") && haskey(f, "blocks/parameters/w/value")
     end
+    st = CNLPLib.read_start(m, path)                         # the file back, as a start
+    @test st.x0 == res.solution && st.y0 ≈ res.multipliers
+    @test_throws CNLPLib.CNLPError CNLPLib.read_start(CNLPModel(CNLPLib.load(LIBPATH), :tq, 5), path)
+end
+
+@testset "the model's own formats (tq: a txt writer, txtn/txtw/txt readers)" begin
+    lib = CNLPLib.load(LIBPATH)
+    m = CNLPModel(lib, :tq, 4)
+    @test writers(m) == [:txt] && default_writer(m) === nothing
+    @test readers(m) == [:txtn => :instance, :txtw => :parameters, :txt => :start]
+    res = madnlp(m; print_level = MadNLP.ERROR)
+    dir = mktempdir()
+    @test write_solution(m, joinpath(dir, "x.txt"), res; format = :txt) == joinpath(dir, "x.txt")
+    @test read_start(m, :txt, joinpath(dir, "x.txt")).x0 == res.solution
+    write(joinpath(dir, "n.txt"), "6\n")
+    @test CNLPModel(lib, :tq; input = :txtn => joinpath(dir, "n.txt")).meta.nvar == 6
+    write(joinpath(dir, "w.txt"), "3 4\n")
+    read_parameters!(m, :txtw, joinpath(dir, "w.txt"))
+    @test value(m, parameters(m, :w)) == [3.0, 4.0]
 end
 include("solver.jl")
 include("callbacks.jl")

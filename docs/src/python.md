@@ -61,6 +61,14 @@ with `backend="cuda"` is solved on the GPU, through the library's CUDA tier, by 
 (`solver="cumadnlp"`). It returns the status, objective, iterations, solution and multipliers
 (CuPy arrays for a GPU model).
 
+`m.write_solution(path, r)` writes a result as a [cnlp-solution](../../formats/solution.md)
+file (through libcnlpio, the library the `cnlp` command installs and Julia uses too), or
+with the model's default writer if it names one; `format="cnlp"` or one of `m.writers`
+chooses. `m.read_start(path)` reads a solution file back as a start (`x`, `y`, `zl`, `zu`).
+A library's own formats are reachable by name: `m.readers` (`name -> kind`),
+`CModel(lib, "acopf", input=("matpower", "case.m"))`, `m.read_start(path, reader="matpower")`,
+`m.read_parameters("name", path)`.
+
 `m.report_instance()` and `m.report_solution(x, y, zl, zu)` are the library's reports (text
 about the instance and about a solution; `""` when it has none). With the library's CUDA
 build, `CModel(..., backend="cuda")` evaluates on the GPU: `obj`, `grad`, `cons`, `jac` and

@@ -23,7 +23,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[test]" "ruff==0.16.2"
+      # HDF5's development files build libcnlpio for the solution-file tests
+      - run: sudo apt-get update -q && sudo apt-get install -y -q libhdf5-dev pkg-config
+      - run: pip install -e ".[test]" h5py "ruff==0.16.2"
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest -q --cov=cnlplib --cov-report=xml

@@ -6,6 +6,7 @@
 numpy in, numpy out, structure indices 0-based (the ABI's are 1-based).
 """
 
+from .io import Start, default_reader, readers
 from .model import (
     BlockRef,
     Blocks,
@@ -32,9 +33,11 @@ __all__ = [
     "CModel",
     "Result",
     "Solver",
+    "Start",
     "argtype",
     "available_models",
     "data_file",
+    "default_reader",
     "install",
     "lib",
     "load",
@@ -42,6 +45,7 @@ __all__ = [
     "multipliers",
     "multipliers_lower",
     "multipliers_upper",
+    "readers",
     "schema",
     "set_path",
     "solution",

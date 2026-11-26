@@ -6,7 +6,7 @@
 #   --path DIR         install directory (default ~/.cnlplib)
 #   --add-to-path no   leave shell startup files alone
 #
-# It installs DIR/bin/cnlp and the solve driver DIR/bin/cnlp-solve and, unless told not
+# It installs DIR/bin/cnlp, the solve driver DIR/bin/cnlp-solve, DIR/lib/libcnlpio.so and, unless told not
 # to, adds to ~/.bashrc, ~/.zshrc and ~/.profile a marked block that puts DIR/bin on PATH
 # and DIR/lib on CNLPLIB_PATH, so cnlp consumers find installed libraries by name. Run it
 # again to update both.
@@ -52,6 +52,8 @@ if [ -n "$PLAT" ]; then
         got="$( (sha256sum "$d/$a" 2>/dev/null || shasum -a 256 "$d/$a") | cut -d' ' -f1)"
         if [ -n "$want" ] && [ "$want" = "$got" ]; then
             tar -xzf "$d/$a" -C "$d" && mv "$d/cnlp-solve/bin/cnlp-solve" "$PREFIX/bin/cnlp-solve" && echo "Installed $PREFIX/bin/cnlp-solve"
+            # the solution file library Julia and Python use (cnlpio.h)
+            [ -f "$d/cnlp-solve/lib/libcnlpio.so" ] && mkdir -p "$PREFIX/lib" && mv "$d/cnlp-solve/lib/libcnlpio.so" "$PREFIX/lib/libcnlpio.so"
         else
             echo "install: checksum mismatch for $a; cnlp solve is not installed" >&2
         fi

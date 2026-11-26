@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from . import io as _io
 from . import registry as _registry
 
 _c_int = ctypes.c_int64
@@ -497,6 +498,9 @@ class CModel:
     string goes to the model's own entry point when it has one; no arguments instantiate a
     model that takes none. Any number of instances may coexist per library.
 
+    `input=(reader, path)` instantiates from the model's own format, with one of its
+    instance readers (`cnlplib.readers(lib, model)`).
+
     `backend="cuda"` evaluates through the library's device tier (its CUDA build): `obj`,
     `grad`, `cons`, `jac` and `hess` take and return CuPy arrays. The bounds, starting point
     and structures stay NumPy arrays on the host.
@@ -508,6 +512,7 @@ class CModel:
         *args: Any,
         prefix: str | None = None,
         backend: str | None = None,
+        input: tuple[str, str] | None = None,
     ) -> None:
         spec_prefix = None
         if isinstance(lib, str):
@@ -528,7 +533,12 @@ class CModel:
             _require_model(lib, model)
         # instantiate before resolving the evaluation table, so a failure to build the
         # model surfaces as what it is
-        self._id = _instantiate(lib, prefix, args)
+        if input is not None:
+            if args:
+                raise TypeError("give either instantiation arguments or input=(reader, path), not both")
+            self._id = _io.instantiate_from(lib, prefix, *input)
+        else:
+            self._id = _instantiate(lib, prefix, args)
         self._prefix = prefix
         self._lib = lib
         self._vars, self._cons, self._pars = _read_layout(lib, prefix, self._id)
@@ -761,6 +771,37 @@ class CModel:
             raise ValueError(f"parameter {b.name!r} has {b.length} elements, got {v.size}")
         fn = _f(self._lib, self._prefix, "set_value", [_c_int, _c_int, _pd, _c_int])
         _check(fn(self._id, _c_int(b.index), _arr(v), _c_int(b.length)), f"{self._prefix}_set_value")
+
+    # ── solution files and the model's own formats (cnlplib.io) ─────────────────────────
+
+    @property
+    def writers(self) -> list[str]:
+        """The solution writers the library carries for this model."""
+        return _io.writers(self)
+
+    @property
+    def default_writer(self) -> str | None:
+        """The writer the library names as this model's default, or None."""
+        return _io.default_writer(self)
+
+    @property
+    def readers(self) -> dict[str, str]:
+        """The model's own input readers, `name -> kind`."""
+        return _io.readers(self._lib, self._prefix)
+
+    def write_solution(self, path: str, result: Any, format: str | None = None) -> str:
+        """Write a solve's result: with the library's default writer if it names one, else
+        as a standard cnlp-solution file; `format` forces `"cnlp"` or one of `writers`."""
+        return _io.write_solution(self, path, result, format)
+
+    def read_start(self, path: str, reader: str | None = None) -> _io.Start:
+        """A starting point (`x`, `y`, `zl`, `zu`) from a cnlp-solution file, or from the
+        model's own format with one of its start readers."""
+        return _io.read_start(self, path, reader)
+
+    def read_parameters(self, reader: str, path: str) -> None:
+        """Set the parameters from the model's own format, with one of its readers."""
+        _io.read_parameters(self, reader, path)
 
     def _par_block(self, block):
         b = self.parameters[block] if isinstance(block, str) else block

@@ -10,6 +10,7 @@
  * obj_weight * f + sum_i y_i c_i (the constraint is linear, so y drops out).
  */
 #include <stdint.h>
+#include <stdio.h>
 #include <math.h>
 
 /* ── cnlp v0.2 conformance ─────────────────────────────────────────────────
@@ -270,6 +271,66 @@ int64_t tq_set_value(int64_t id, int64_t k, const double *vals, int64_t len) {
     if (len != 2) return 3;
     tq_w[id - 1][0] = vals[0];
     tq_w[id - 1][1] = vals[1];
+    return 0;
+}
+
+/* ── Writers and readers: `tq`'s own text format ────────────────────────────
+ * One writer, `txt` (n, then x, one value per line), and no default writer, so a
+ * consumer's default is the standard file. Three readers, one of each kind: `txtn`
+ * (instance: a file holding n), `txtw` (parameters: the two values of w), and `txt`
+ * (start: a file the writer wrote; the multipliers are left 0). */
+static int64_t tq_name(const char *nm, uint8_t *buf, int64_t cap) {
+    int64_t len = 0;
+    while (nm[len]) len++;
+    for (int64_t i = 0; i < cap && i < len; i++) buf[i] = (uint8_t)nm[i];
+    return len;
+}
+int64_t tq_nwriters(void) { return 1; }
+int64_t tq_writer_name(int64_t k, uint8_t *buf, int64_t cap) { return k == 0 ? tq_name("txt", buf, cap) : -1; }
+int64_t tq_default_writer(int64_t id, uint8_t *buf, int64_t cap) { (void)id; (void)buf; (void)cap; return 0; }
+int64_t tq_write_txt(int64_t id, const char *path, const double *x, const double *y,
+                     const double *zl, const double *zu, double objective, const char *status) {
+    (void)y; (void)zl; (void)zu; (void)objective; (void)status;
+    int64_t N = getN(id);
+    FILE *f = N > 0 ? fopen(path, "w") : 0;
+    if (!f) return 1;
+    fprintf(f, "%lld\n", (long long)N);
+    for (int64_t i = 0; i < N; i++) fprintf(f, "%.17g\n", x[i]);
+    return fclose(f) ? 1 : 0;
+}
+
+int64_t tq_nreaders(void) { return 3; }
+int64_t tq_reader_name(int64_t k, uint8_t *buf, int64_t cap) {
+    const char *nm = k == 0 ? "txtn" : k == 1 ? "txtw" : k == 2 ? "txt" : 0;
+    return nm ? tq_name(nm, buf, cap) : -1;
+}
+int64_t tq_reader_kind(int64_t k) { return k >= 0 && k <= 2 ? k : -1; }
+int64_t tq_default_reader(uint8_t *buf, int64_t cap) { (void)buf; (void)cap; return 0; }
+int64_t tq_new_from_txtn(const char *path) {
+    FILE *f = fopen(path, "r");
+    long long n = 0;
+    int ok = f && fscanf(f, "%lld", &n) == 1;
+    if (f) fclose(f);
+    return ok ? tq_new((int64_t)n) : 0;
+}
+int64_t tq_set_from_txtw(int64_t id, const char *path) {
+    if (getN(id) <= 0) return 1;
+    FILE *f = fopen(path, "r");
+    double w[2];
+    int ok = f && fscanf(f, "%lf %lf", &w[0], &w[1]) == 2;
+    if (f) fclose(f);
+    return ok ? tq_set_value(id, 2, w, 2) : 2;
+}
+int64_t tq_start_from_txt(int64_t id, const char *path, double *x0, double *y0, double *zl, double *zu) {
+    int64_t N = getN(id);
+    FILE *f = N > 0 ? fopen(path, "r") : 0;
+    long long n = 0;
+    int ok = f && fscanf(f, "%lld", &n) == 1 && n == N;
+    for (int64_t i = 0; ok && i < N; i++) ok = fscanf(f, "%lf", &x0[i]) == 1;
+    if (f) fclose(f);
+    if (!ok) return 2;
+    y0[0] = 0;
+    for (int64_t i = 0; i < N; i++) zl[i] = zu[i] = 0;
     return 0;
 }
 
