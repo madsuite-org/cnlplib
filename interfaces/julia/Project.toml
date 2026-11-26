@@ -1,0 +1,43 @@
+name = "CNLPLib"
+uuid = "e8ddee8d-ce21-405b-9ec9-45cea2c1b284"
+authors = ["Sungho Shin <sushin@mit.edu>"]
+version = "0.4.0"
+
+[deps]
+Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Mmap = "a63ad114-7e13-5084-954f-fe012c677804"
+NLPModels = "a4795742-8479-5a88-8948-cc11e1c8c1a6"
+ObjectFile = "d8793406-e978-5875-9003-1fc021f44a92"
+Patchelf_jll = "f2cf89d6-2bfd-5c44-bd2c-068eea195c0c"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+StructIO = "53d494c1-5632-5724-8f4c-31dff12d585f"
+
+[weakdeps]
+HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+CUDACore = "bd0ed864-bdfe-4181-a5ed-ce625a5fdea2"
+
+[extensions]
+CNLPLibHDF5Ext = "HDF5"
+CNLPLibCUDAExt = "CUDACore"
+
+[compat]
+Libdl = "1"
+LinearAlgebra = "1"
+Mmap = "1"
+Random = "1"
+HDF5 = "0.17"
+CUDACore = "6"
+NLPModels = "0.21"
+ObjectFile = "0.5"
+Patchelf_jll = "0.18"
+StructIO = "0.3"
+julia = "1.10"
+
+[extras]
+HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+MadNLP = "2621e9c9-9eb4-46b1-8089-e8c72242dfb6"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["HDF5", "MadNLP", "Test"]
