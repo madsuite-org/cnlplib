@@ -309,6 +309,107 @@ function set_failure!(result::Ptr{CNLPResult}, message::AbstractString)
     return result
 end
 
+# ── for a solver compiled as a cnlp solver library ───────────────────────────────────
+# What every such library does around its own solve: copy strings out to the caller, keep
+# its BLAS, report compilation at run time, and turn options, a model and an outcome into the
+# C result.
+
+"""
+    copyout(s, buf, cap) -> Int64
+
+The cnlp string convention: copy `s` into `buf` (at most `cap` bytes) and return its length;
+`buf = C_NULL` asks for the length only.
+"""
+function copyout(s::AbstractString, buf::Ptr{UInt8}, cap::Integer)
+    b = codeunits(String(s)); n = length(b)
+    buf == C_NULL || cap <= 0 || GC.@preserve b unsafe_copyto!(buf, pointer(b), min(n, Int(cap)))
+    return Int64(n)
+end
+
+"""
+    blas_state() -> Vector{String}
+    restore_blas!(state)
+
+The libraries libblastrampoline forwards to, and forwarding to them again. A solver library
+records its state when it loads (`__init__`) and restores it before every solve: another Julia
+runtime in the process (a model library) may open the same libblastrampoline by name when it
+starts and forward it elsewhere, or nowhere.
+"""
+blas_state() = String[l.libname for l in LinearAlgebra.BLAS.get_config().loaded_libs]
+function restore_blas!(state::Vector{String})
+    (isempty(state) || blas_state() == state) && return nothing
+    for (k, l) in enumerate(state)
+        LinearAlgebra.BLAS.lbt_forward(l; clear = k == 1)
+    end
+    return nothing
+end
+
+"""
+    CompileTrace(var)
+
+Reporting of compilation at run time, switched on by the environment variable `var` (`=1`):
+every method compiled is listed on stderr with its compile time, as a `precompile` statement,
+and `report(trace, ns)` prints the total of a solve. A build is checked to report 0.
+"""
+mutable struct CompileTrace
+    var::String
+    on::Int   # -1: not read yet (an image keeps the build's setting; reset it in `__init__`)
+end
+CompileTrace(var::AbstractString) = CompileTrace(String(var), -1)
+function tracing(t::CompileTrace)
+    if t.on < 0
+        t.on = get(ENV, t.var, "0") == "1" ? 1 : 0
+        if t.on == 1
+            ccall(:jl_force_trace_compile_timing_enable, Cvoid, ())
+            Base.cumulative_compile_timing(true)
+        end
+    end
+    return t.on == 1
+end
+compile_ns() = Base.cumulative_compile_time_ns()[1]
+# the caller is C: flush before returning, or what Julia buffered is lost when it exits
+function report(t::CompileTrace, name::AbstractString, ns)
+    println(stderr, string(name, ": compiled at run time: ", round(Int, ns / 1.0e6), " ms of Julia methods"))
+    flush(stdout); flush(stderr)
+    return nothing
+end
+
+"""
+    serve(solve, model, nopt, keys, vals, result; options = identity, blas = String[], trace = nothing, name = "solver") -> Int64
+
+A solve for a C caller (`cnlp_solve`): restores `blas`, parses the options (`options(pairs)`,
+where `pairs` are `solver_options`'s), builds the model (`model()`), solves it with
+`solve(m, opts)`, which returns `(x, y, zl, zu, objective, status, iterations, message)` in the
+NLPModels sign convention with a cnlp status, and writes the result. Returns 0 when the solver
+ran, 1 for an invalid option, 2 for a failure (the message in the result).
+"""
+function serve(solve, model, nopt::Int64, keys::Ptr{Ptr{UInt8}}, vals::Ptr{Ptr{UInt8}}, result::Ptr{CNLPResult};
+               options = identity, blas::Vector{String} = String[], trace = nothing, name::AbstractString = "solver")
+    on = trace !== nothing && tracing(trace)
+    t0 = on ? compile_ns() : UInt64(0)
+    restore_blas!(blas)
+    rc = _serve(solve, model, nopt, keys, vals, result, options)
+    on ? report(trace, name, compile_ns() - t0) : (flush(stdout); flush(stderr))
+    return rc
+end
+function _serve(solve, model, nopt, keys, vals, result, options)
+    opts = try
+        options(solver_options(nopt, keys, vals))
+    catch e
+        set_failure!(result, "invalid option: " * sprint(showerror, e))
+        return Int64(1)
+    end
+    try
+        m = model()
+        x, y, zl, zu, objective, status, iterations, message = solve(m, opts)
+        set_result!(result, m, x, y, zl, zu, objective, status, iterations, message)
+        return Int64(0)
+    catch e
+        set_failure!(result, sprint(showerror, e))
+        return Int64(2)
+    end
+end
+
 # ── a CNLPModel handed to a cnlp solver ──────────────────────────────────────────────
 
 """

@@ -94,3 +94,30 @@ end
         end
     end
 end
+
+@testset "serving a C caller (a solver library)" begin
+    @test CNLPLib.copyout("madnlp", Ptr{UInt8}(C_NULL), 0) == 6
+    buf = zeros(UInt8, 3)
+    @test CNLPLib.copyout("madnlp", pointer(buf), 3) == 6 && String(copy(buf)) == "mad"
+    st = CNLPLib.blas_state()
+    @test !isempty(st)
+    CNLPLib.restore_blas!(st)
+    @test CNLPLib.blas_state() == st
+    x, y, zl, zu = zeros(2), zeros(1), zeros(2), zeros(2)
+    r = Ref(CNLPResult(pointer(x), pointer(y), pointer(zl), pointer(zu), 0.0, -1, -1, ntuple(_ -> 0x00, 128)))
+    ks, vs = ["tol"], ["1e-8"]
+    kp, vp = pointer.(ks), pointer.(vs)
+    GC.@preserve x y zl zu r ks vs kp vp begin
+        rp = Base.unsafe_convert(Ptr{CNLPResult}, r)
+        seen = Ref{Any}(nothing)
+        rc = CNLPLib.serve(() -> CNLPLib._toy_problem(), 1, pointer(kp), pointer(vp), rp;
+                           options = o -> Dict(o), blas = st) do m, o
+            seen[] = o
+            ([0.0, 1.0], [2.0], [0.0, 0.0], [0.0, 0.0], 1.0, CNLP_SOLVED, 3, "done")
+        end
+        @test rc == 0 && seen[] == Dict("tol" => "1e-8") && x == [0.0, 1.0] && r[].iterations == 3
+        @test CNLPLib.serve((m, o) -> error("boom"), () -> CNLPLib._toy_problem(), 0, Ptr{Ptr{UInt8}}(C_NULL), Ptr{Ptr{UInt8}}(C_NULL), rp) == 2
+        @test r[].status == CNLP_ERROR && occursin("boom", String(UInt8[c for c in r[].solver_status if c != 0]))
+        @test CNLPLib.serve((m, o) -> nothing, () -> nothing, 1, pointer(kp), pointer(vp), rp; options = o -> error("bad")) == 1
+    end
+end
