@@ -260,6 +260,15 @@ install_one() {
     rm -rf "$dest/.old-$n" "$stage"
     trap - EXIT INT TERM
     echo "Installed $n $ver in $dest/$n"
+    privatize
+}
+
+# Private names for the store's bundled libraries (OpenSSL, curl, libstdc++, ...), so that a
+# process that has already loaded its own copies (Python's hashlib loads the system OpenSSL)
+# cannot be handed them in place of the bundle's: cnlp-solve --privatize, see solve/privatize.h.
+privatize() {
+    _ps="$CNLPLIB_HOME/bin/cnlp-solve"; [ -x "$_ps" ] || _ps="$(command -v cnlp-solve 2>/dev/null)" || return 0
+    "$_ps" --privatize || echo "cnlp: could not give the bundled libraries private names" >&2
 }
 
 cmd_install() {

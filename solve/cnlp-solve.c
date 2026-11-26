@@ -358,7 +358,10 @@ static void usage(void) {
          "  --device auto (default: the GPU when the model and the solver both run there), cpu or cuda");
 }
 
+#include "privatize.h"
+
 int main(int argc, char** argv) {
+    if (argc >= 2 && !strcmp(argv[1], "--privatize")) return privatize(argc - 2, argv + 2);
     if (argc < 2 || !strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) { usage(); return argc < 2; }
     const char *libspec = NULL, *start = NULL, *solver = "ipopt", *device = "auto";
     char *pos[64], *outs[16], *keys[128], *vals[128]; int npos = 0, nout = 0, nopt = 0;

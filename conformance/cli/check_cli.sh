@@ -23,7 +23,12 @@ R=$W/releases; mkdir -p "$R/cnlplib" "$R/cnlptest" "$R/data"
 cp "$DIST/cnlp-solve-$PLAT.tar.gz" "$DIST/ipopt-$PLAT.tar.gz" "$R/cnlplib/"
 (cd "$R/cnlplib" && sha256sum -- *.tar.gz > SHA256SUMS)
 mkdir -p "$W/b/cnlptest/lib"
-cc -std=c99 -O2 -shared -fPIC -o "$W/b/cnlptest/lib/libcnlptest.so" "$ROOT/conformance/cli/testlib.c" -lm
+# the library carries a library of its own, as a bundle carries its runtime's: `cnlp install`
+# gives it a private name, and the library still loads
+printf 'double cnlpdep_one(void) { return 1.0; }\n' > "$W/dep.c"
+cc -shared -fPIC -Wl,-soname,libcnlpdep.so.1 -o "$W/b/cnlptest/lib/libcnlpdep.so.1" "$W/dep.c"
+cc -std=c99 -O2 -shared -fPIC -o "$W/b/cnlptest/lib/libcnlptest.so" "$ROOT/conformance/cli/testlib.c" -lm \
+    -L"$W/b/cnlptest/lib" -Wl,--no-as-needed -l:libcnlpdep.so.1 -Wl,-rpath,'$ORIGIN'
 printf 'name = cnlptest\nversion = 0.0.1\ncnlp_abi = 0.2\n' > "$W/b/cnlptest/VERSION"
 tar -C "$W/b" -czf "$R/cnlptest/cnlptest-$PLAT.tar.gz" cnlptest
 (cd "$R/cnlptest" && sha256sum -- *.tar.gz > SHA256SUMS)
@@ -52,6 +57,11 @@ cnlp install cnlptest ipopt > "$W/i.log" 2>&1 && ok "cnlp install cnlptest ipopt
 cnlp list | grep -q 'cpu' && ok "cnlp list shows backends" || bad "cnlp list shows backends"
 [ "$(cnlp list | grep -c '^  cnlptest ')" = 1 ] && cnlp list | grep '^  cnlptest ' | grep -q 'latest' && ok "cnlp list has one row per library, with what is installed" || bad "cnlp list rows: $(cnlp list)"
 cnlp install cnlptest 2>&1 | grep -q 'up to date' && ok "a second install is a no-op" || bad "a second install is a no-op"
+L=$CNLPLIB_HOME/lib/cnlptest/lib
+grep -q 'cnlcnlpdep.so.1' "$L/libcnlptest.so" && ! grep -q 'libcnlpdep.so.1' "$L/libcnlptest.so" && grep -q 'cnlcnlpdep.so.1' "$L/libcnlpdep.so.1" \
+    && [ -L "$L/cnlcnlpdep.so.1" ] && ok "the library's own libraries get private names (cnl...), with a link under each" \
+    || bad "private names: $(ls -l "$L")"
+cnlp-solve --privatize | grep -q . && bad "giving private names twice changes something" || ok "giving private names again changes nothing"
 
 # ── cnlp solve ───────────────────────────────────────────────────────────────────
 h5() {   # FILE FIELD -> value
