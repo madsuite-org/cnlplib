@@ -13,6 +13,7 @@ import numpy as np
 __all__ = [
     "BlockRef",
     "CModel",
+    "Result",
     "argtype",
     "available_models",
     "data_file",
@@ -25,13 +26,13 @@ __all__ = [
     "schema",
     "set_path",
     "solution",
-    "solve_ipopt",
+    "solve",
     "update",
 ]
 
 from . import registry as _registry
-from .ipopt import solve_ipopt
 from .registry import data_file, install, update
+from .solve import Result, solve
 
 _c_int = ctypes.c_int64
 _c_dbl = ctypes.c_double
@@ -482,6 +483,8 @@ class CModel:
         # model surfaces as what it is
         self._id = _instantiate(lib, prefix, args)
         self._prefix = prefix
+        # how `cnlp solve` would name this instance (cnlplib.solve)
+        self._cli = (f"{lib._name}:{prefix}", tuple(args))
         self._lib = lib
         self._vars, self._cons, self._pars = _read_layout(lib, prefix, self._id)
         self._fn = {

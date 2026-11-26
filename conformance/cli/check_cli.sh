@@ -105,6 +105,13 @@ cnlp solve @cnlptest:pn 6 --device tpu $S > "$W/e.log" 2>&1 && bad "an unknown d
 cnlp solve @cnlptest:pn 6 $S > "$W/s.log" 2>&1 && grep -q '(cpu)' "$W/s.log" && ok "without a device tier the solve runs on the cpu, and says so" || bad "cpu solve: $(cat "$W/s.log")"
 cnlp solve @cnlptest:pb 5 > "$W/e.log" 2>&1 && bad "a wrong number of arguments is refused" || { grep -q 'takes 2' "$W/e.log" && ok "a wrong number of arguments is refused" || bad "argument count message: $(cat "$W/e.log")"; }
 cnlp solve @nolib:x 1 > "$W/e.log" 2>&1 && bad "a missing library is refused" || { grep -q 'cnlp install' "$W/e.log" && ok "a missing library is refused, with what to install" || bad "missing library message: $(cat "$W/e.log")"; }
+# Python: cnlplib.solve runs `cnlp solve` and reads the solution back
+PYTHONPATH="$ROOT/interfaces/cnlplib-py/src" "$PY" -c '
+import cnlplib, numpy as np
+for r in (cnlplib.solve("@cnlptest:pn", 6), cnlplib.solve(cnlplib.CModel("@cnlptest", "pn", 6), tol=1e-10)):
+    assert r.status == "solved" and abs(r.objective - 0.5) < 1e-6, r
+    assert np.allclose(r.solution, [0.5, 0.5, 1, 1, 1, 1], atol=1e-6) and r.solver == "ipopt" and r.device == "cpu"
+' > "$W/py.log" 2>&1 && ok "Python: cnlplib.solve (a spec, or a CModel) through cnlp solve" || bad "cnlplib.solve: $(cat "$W/py.log")"
 
 # ── cnlp up / remove ────────────────────────────────────────────────────────────
 cnlp up > "$W/u.log" 2>&1 && ok "cnlp up" || bad "cnlp up: $(cat "$W/u.log")"

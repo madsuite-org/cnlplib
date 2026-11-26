@@ -86,15 +86,6 @@ def test_solve_with_scipy(m):
     assert np.allclose(res.x, [0.5, 0.5, 1.0, 1.0], atol=1e-6)
 
 
-def test_solve_with_cyipopt(m):
-    cyipopt = pytest.importorskip("cyipopt")  # noqa: F841
-    from cnlplib import solve_ipopt
-    x, info = solve_ipopt(m, print_level=0)
-    assert info["status"] == 0
-    assert abs(info["obj_val"] - 0.5) < 1e-8
-    assert np.allclose(x, [0.5, 0.5, 1.0, 1.0], atol=1e-6)
-
-
 def test_name_based_loading(lib, tmp_path):
     shutil.copy(pathlib.Path(lib._name), tmp_path / "libtoy.so")
     cnlplib.set_path(tmp_path)
