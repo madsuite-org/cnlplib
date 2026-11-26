@@ -29,7 +29,7 @@ close(a, b) = maximum(abs, Array(a) .- b; init = 0.0) <= 1e-12 * max(1.0, maximu
     @test close(jprod(d, X, V), jprod(h, x, v))
     @test close(jtprod(d, X, W), jtprod(h, x, w))
     @test close(hprod(d, X, Y, V), hprod(h, x, y, v))
-    @test keys(get_vars(d)) == keys(get_vars(h))
+    @test keys(variables(d)) == keys(variables(h))
     # a result on the device is written from the host, like any other
     r = (; solution = X, multipliers = Y, multipliers_L = CUDA.zeros(n), multipliers_U = CUDA.zeros(n),
          objective = obj(h, x), status = :first_order, iter = 0)

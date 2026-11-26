@@ -24,8 +24,7 @@ libraries the `cnlp` command installed in `$CNLPLIB_HOME` (default `~/.cnlplib`)
 found nowhere is installed there with `cnlp install`
 (`curl -fsSL https://cnlplib.madsuite.org/install | sh`), so one copy serves the `cnlp`
 command, Julia and Python. `name@nightly` is the nightly build; `CNLPLib.update!("lv")`
-fetches a newer release. `cnlp"name"` is the loaded library itself, and
-`CNLPLib.load(path)` bypasses the lookup.
+fetches a newer release. `CNLPLib.load(path)` bypasses the lookup.
 
 A library may carry several models, each under its own symbol prefix: the symbol selects
 one (`:wood` binds `wood_new`, `wood_obj`, ...). Without a symbol the prefix defaults to
@@ -37,9 +36,9 @@ m = CNLPModel("@mymodel", [(i = 1, pd = 0.4), (i = 2, pd = 0.3)], [0.9, 0.9], 10
 ```
 
 `available_models(lib)`, `argtype(lib, :wood)` and `schema_json(lib, :wood)` say what a
-library carries and what each model takes. `get_vars(m)`, `get_cons(m)` and `get_pars(m)`
-are the model's named blocks, for `solution(res, get_vars(m, :pg))`, `multipliers`,
-`multipliers_L`, `multipliers_U`, and `get_value` / `set_value!` on parameters.
+library carries and what each model takes. `variables(m)`, `constraints(m)` and `parameters(m)`
+are the model's named blocks, for `solution(res, variables(m, :pg))`, `multipliers`,
+`multipliers_L`, `multipliers_U`, and `value` / `value!` on parameters.
 
 ### GPU
 
@@ -89,7 +88,7 @@ device problem of `md`, the same instance on the GPU.
 ### Notes for libraries carrying their own runtime
 
 A library embedding a Julia runtime re-forwards the process's BLAS trampoline on its first
-call; this package restores the host's BLAS forwarding afterwards (`restore_blas!(lib)`
+call; this package restores the host's BLAS forwarding afterwards (`CNLPLib.restore_blas!(lib)`
 re-applies it). An unbundled juliac library (linked against the standard `libjulia`) cannot
 share the host's runtime; on Linux and macOS, `load` gives it a private copy of the
 installed Julia runtime (same Julia version required). Elsewhere, compile with

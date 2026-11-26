@@ -19,7 +19,7 @@ res = madnlp(m)
 A library carrying its own Julia runtime re-forwards the process's libblastrampoline on
 its first call, clearing the host's BLAS. [`load`](@ref) snapshots the host's BLAS
 configuration and [`CNLPModel`](@ref) restores it after the first call;
-[`restore_blas!`](@ref) does so again at any time.
+[`CNLPLib.restore_blas!`](@ref) does so again at any time.
 """
 module CNLPLib
 
@@ -29,8 +29,8 @@ using PrecompileTools: @setup_workload, @compile_workload
 import NLPModels: NLPModels, AbstractNLPModel, NLPModelMeta, Counters,
     increment!, @lencheck
 
-export CNLPModel, argtype, available_models, restore_blas!, schema_json, set_path!, @cnlp_str,
-    get_vars, get_cons, get_pars, get_value, set_value!,
+export CNLPModel, argtype, available_models, schema_json, set_path!,
+    variables, constraints, parameters, value, value!,
     solution, multipliers, multipliers_L, multipliers_U, writers, write_solution, default_writer,
     report_instance, report_solution,
     readers, default_reader, read_start, read_parameters!
@@ -40,7 +40,7 @@ export CNLPModel, argtype, available_models, restore_blas!, schema_json, set_pat
     eval(Meta.parse("public CNLPError, CLib, BlockRef, lib, load, install, update!, data_file, " *
                     "ProblemModel, CNLPProblem, CNLPResult, CNLPDeviceProblem, CallbackError, " *
                     "problem, device_problem, set_result!, set_failure!, solver_options, serve, " *
-                    "copyout, blas_state, CompileTrace"))
+                    "copyout, blas_state, restore_blas!, CompileTrace"))
 end
 
 include("patchversion.jl")
@@ -69,7 +69,7 @@ const _LIBS = Dict{String, CLib}()
     set_path!(dirs...)
 
 Set the library search path used by name-based loading (`CNLPLib.lib("acopf")`,
-`CNLPModel("@acopf", ...)`, `cnlp"acopf"`). Initialized from the colon-separated
+`CNLPModel("@acopf", ...)`). Initialized from the colon-separated
 `CNLPLIB_PATH` environment variable; calling `set_path!` replaces it.
 """
 function set_path!(dirs::AbstractString...)
@@ -106,15 +106,6 @@ function lib(name::AbstractString)
         end
         return load(_registry_lib(name))
     end
-end
-
-"""
-    cnlp"name"
-
-[`lib`](@ref)`("name")`, resolved at run time: `CNLPModel(cnlp"acopf", bus, 100.0)`.
-"""
-macro cnlp_str(name)
-    return :(lib($name))
 end
 
 """
@@ -194,7 +185,7 @@ end
 
 A named block of a model (a variable, constraint or parameter): `offset` (0-based) and
 `length` of its slice, `dims` its shape, `index` the library's own numbering, used by
-[`get_value`](@ref) / [`set_value!`](@ref).
+[`value`](@ref) / [`value!`](@ref).
 """
 struct BlockRef
     name::Symbol
@@ -234,7 +225,7 @@ function _read_layout(lib::CLib, prefix::AbstractString, id::Int64)
         return _read_layout_strict(lib, prefix, id, nb)
     catch err
         @warn "reading the named-block layout of `$prefix` failed; the model
-               works, but get_vars/get_cons/get_pars will report no blocks" err
+               works, but variables/constraints/parameters will report no blocks" err
         return ((;), (;), (;))
     end
 end
@@ -537,8 +528,8 @@ end
     CNLPModel(lib, model::Symbol, arg1, arg2, ...; name = String(model))
 
 A model of a library carrying several, by name: the symbol is the prefix its functions are
-exported under (`:acopf` binds `acopf_new`, `acopf_obj`, ...). `lib` is a `CLib`, a
-`cnlp"..."` literal, an `"@name"`, or a path.
+exported under (`:acopf` binds `acopf_new`, `acopf_obj`, ...). `lib` is a `CLib`, an
+`"@name"`, or a path.
 
     m = CNLPModel("@grid", :acopf, bus, 100.0)   # acopf_* inside libgrid.so
     d = CNLPModel("@grid", :dcopf, bus)          # dcopf_* in the same library
@@ -635,43 +626,40 @@ end
 # ── Named blocks ─────────────────────────────────────────────────────────────
 
 """
-    get_vars(model[, name])
-    get_cons(model[, name])
-    get_pars(model[, name])
+    variables(model[, name])
+    constraints(model[, name])
+    parameters(model[, name])
 
 The model's named blocks of that kind, as a `NamedTuple` of [`BlockRef`](@ref)s, or one of
 them by name; empty for a library that publishes none. Use them with [`solution`](@ref),
 [`multipliers`](@ref), [`multipliers_L`](@ref) / [`multipliers_U`](@ref), and
-[`get_value`](@ref) / [`set_value!`](@ref) for parameters.
+[`value`](@ref) / [`value!`](@ref) for parameters.
 
     m = CNLPModel("@grid", :acopf, bus)
-    keys(get_vars(m))                 # (:pg, :qg, :vm, :va)
-    solution(result, get_vars(m, :pg))
-
-ExaModels exports accessors with these names too; with both loaded, qualify as
-`CNLPLib.get_vars`.
+    keys(variables(m))                 # (:pg, :qg, :vm, :va)
+    solution(result, variables(m, :pg))
 """
-get_vars(m::CNLPModel) = getfield(m, :vars)
+variables(m::CNLPModel) = getfield(m, :vars)
 
-@doc (@doc get_vars)
-get_cons(m::CNLPModel) = getfield(m, :cons)
+@doc (@doc variables)
+constraints(m::CNLPModel) = getfield(m, :cons)
 
-@doc (@doc get_vars)
-get_pars(m::CNLPModel) = getfield(m, :pars)
+@doc (@doc variables)
+parameters(m::CNLPModel) = getfield(m, :pars)
 
-get_vars(m::CNLPModel, name::Symbol) = _named_block(m, :var, name)
-@doc (@doc get_vars)
-get_cons(m::CNLPModel, name::Symbol) = _named_block(m, :con, name)
-@doc (@doc get_vars)
-get_pars(m::CNLPModel, name::Symbol) = _named_block(m, :par, name)
+variables(m::CNLPModel, name::Symbol) = _named_block(m, :var, name)
+@doc (@doc variables)
+constraints(m::CNLPModel, name::Symbol) = _named_block(m, :con, name)
+@doc (@doc variables)
+parameters(m::CNLPModel, name::Symbol) = _named_block(m, :par, name)
 
 # A name of another kind names the accessor that would work; a typo lists what exists.
 function _named_block(m::CNLPModel, kind::Symbol, name::Symbol)
-    nt = kind === :var ? get_vars(m) : kind === :con ? get_cons(m) : get_pars(m)
+    nt = kind === :var ? variables(m) : kind === :con ? constraints(m) : parameters(m)
     haskey(nt, name) && return nt[name]
-    for (k, other) in ((:var, get_vars(m)), (:con, get_cons(m)), (:par, get_pars(m)))
+    for (k, other) in ((:var, variables(m)), (:con, constraints(m)), (:par, parameters(m)))
         if haskey(other, name)
-            fn = k === :var ? "get_vars" : k === :con ? "get_cons" : "get_pars"
+            fn = k === :var ? "variables" : k === :con ? "constraints" : "parameters"
             throw(ArgumentError("`$name` is a $(k === :var ? "variable" :
                 k === :con ? "constraint" : "parameter") ($fn), not a $kind"))
         end
@@ -713,13 +701,13 @@ multipliers_U(result, b::BlockRef) = _block(result.multipliers_U, b)
 multipliers_U(z::AbstractVector, b::BlockRef) = _block(z, b)
 
 """
-    get_value(model, param)
-    set_value!(model, param, values)
+    value(model, param)
+    value!(model, param, values)
 
 Read (a copy of) or update a parameter block's values, per instance: a write takes effect
 for every later evaluation of this instance.
 """
-function get_value(m::CNLPModel, b::BlockRef)
+function value(m::CNLPModel, b::BlockRef)
     b.kind === :par || throw(ArgumentError("`$(b.name)` is a $(b.kind), not a parameter"))
     out = Vector{Float64}(undef, b.length)
     fp = Libdl.dlsym(m.lib.handle, Symbol(m.prefix, "_get_value"))
@@ -728,8 +716,8 @@ function get_value(m::CNLPModel, b::BlockRef)
     return reshape(out, b.dims...)
 end
 
-@doc (@doc get_value)
-function set_value!(m::CNLPModel, b::BlockRef, values)
+@doc (@doc value)
+function value!(m::CNLPModel, b::BlockRef, values)
     b.kind === :par || throw(ArgumentError("`$(b.name)` is a $(b.kind), not a parameter"))
     v = convert(Vector{Float64}, vec(collect(values)))
     length(v) == b.length || throw(DimensionMismatch(
@@ -996,15 +984,15 @@ function _solution_record(m::CNLPModel, result)
     c = _host_cons(m, x)
     sl(v, b) = collect(_block(v, b))
     blocks = Tuple{String,String,Vector{Pair{String,Array{Float64}}}}[]
-    for (name, b) in pairs(get_vars(m))
+    for (name, b) in pairs(variables(m))
         push!(blocks, ("variables", String(name), ["value" => sl(x, b),
             "multiplier_L" => sl(zl, b), "multiplier_U" => sl(zu, b)]))
     end
-    for (name, b) in pairs(get_cons(m))
+    for (name, b) in pairs(constraints(m))
         push!(blocks, ("constraints", String(name), ["value" => sl(c, b), "multiplier" => sl(y, b)]))
     end
-    for (name, b) in pairs(get_pars(m))
-        push!(blocks, ("parameters", String(name), ["value" => get_value(m, b)]))
+    for (name, b) in pairs(parameters(m))
+        push!(blocks, ("parameters", String(name), ["value" => value(m, b)]))
     end
     return (; library = basename(m.lib.path), model = m.prefix, nvar = m.meta.nvar, ncon = m.meta.ncon,
             minimize = m.meta.minimize, objective = Float64(result.objective),
@@ -1110,7 +1098,7 @@ end
     read_parameters!(m, reader::Symbol, path) -> m
 
 Set the model's parameters from its own file format, with one of its parameter
-readers. Live, like [`set_value!`](@ref).
+readers. Live, like [`value!`](@ref).
 """
 function read_parameters!(m::CNLPModel, reader::Symbol, path::AbstractString)
     _reader_of_kind(m.lib, m.prefix, reader, :parameters)
@@ -1130,10 +1118,10 @@ let M = CNLPModel{Vector{Float64}, Vector{Int}}, V = Vector{Float64}, W = NamedT
         precompile(CNLPModel, (L, args...))
     end
     # named blocks and the library's reports
-    for f in (get_vars, get_cons, get_pars), a in ((), (Symbol,), (String,))
+    for f in (variables, constraints, parameters), a in ((), (Symbol,), (String,))
         precompile(f, (M, a...))
     end
-    precompile(get_value, (M, BlockRef)); precompile(set_value!, (M, BlockRef, V))
+    precompile(value, (M, BlockRef)); precompile(value!, (M, BlockRef, V))
     precompile(report_instance, (M,))
     precompile(Core.kwcall, (NamedTuple{(:prefix,), Tuple{String}}, Type{CNLPModel}, CLib, Int))
     for (f, args) in (

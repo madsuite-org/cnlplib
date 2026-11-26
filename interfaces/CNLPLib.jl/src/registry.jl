@@ -1,6 +1,6 @@
 # Libraries from the cnlplib registry, through the `cnlp` command.
 #
-# `lib("lv")` (so `CNLPModel("@lv", ...)` and `cnlp"lv"`) falls back to the libraries installed
+# `lib("lv")` (so `CNLPModel("@lv", ...)`) falls back to the libraries installed
 # in `$CNLPLIB_HOME` (default `~/.cnlplib`), and installs one that is not there with
 # `cnlp install`: one store, and one installer, for the `cnlp` command, Julia and Python.
 

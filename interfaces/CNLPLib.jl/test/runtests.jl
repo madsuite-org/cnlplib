@@ -67,7 +67,7 @@ run(`$cc -shared -fPIC -O2 -I$ROOT -o $LIBPATH $(joinpath(FIXDIR, "tinyqp.c"))`)
     end
 
     @testset "BLAS guard is callable and BLAS works after it" begin
-        @test restore_blas!(lib) === lib
+        @test CNLPLib.restore_blas!(lib) === lib
         @test ones(2, 2) * ones(2, 2) == fill(2.0, 2, 2)
     end
 
@@ -106,7 +106,6 @@ end
     @test CNLPLib.lib("toyqp") === l          # cached by name
     m = CNLPModel("@toyqp", 4; prefix = "tq") # name-based construction
     @test m.meta.nvar == 4
-    @test cnlp"toyqp" === l                      # the string-literal shortcut
     # not found anywhere: the registry (a local, empty index) has no such library either
     withenv("CNLPLIB_INDEX" => "file://" * (f = tempname(); write(f, ""); f)) do
         @test_throws ErrorException CNLPLib.lib("nonexistent")
@@ -182,7 +181,6 @@ end
     # the same spelling through every library argument
     @test CNLPModel(LIBPATH, :tq, 4).meta.nvar == 4
     @test CNLPModel("@toyqp", :tq, 4).meta.nvar == 4
-    @test CNLPModel(cnlp"toyqp", :tq, 4).meta.nvar == 4
 
     # The display name stays overridable, and defaults to the model.
     @test CNLPModel(lib, :tq, 4; name = "mine").meta.name == "mine"
@@ -336,20 +334,20 @@ end
     lib = CNLPLib.load(LIBPATH)
     # the fixture publishes `x` (variable), `budget` (constraint), `w` (parameter)
     m = CNLPModel(lib, 4; prefix = "tq")
-    @test keys(get_vars(m)) == (:x,)
-    @test keys(get_cons(m)) == (:budget,)
-    @test keys(get_pars(m)) == (:w,)
+    @test keys(variables(m)) == (:x,)
+    @test keys(constraints(m)) == (:budget,)
+    @test keys(parameters(m)) == (:w,)
 
-    b = get_vars(m, :x)
-    @test b === get_vars(m).x
+    b = variables(m, :x)
+    @test b === variables(m).x
     @test (b.kind, b.offset, b.length, b.dims) == (:var, 0, 4, (4,))
     # lengths follow the instance
-    @test get_vars(CNLPModel(lib, 7; prefix = "tq"), :x).length == 7
+    @test variables(CNLPModel(lib, 7; prefix = "tq"), :x).length == 7
 
     # a name of the wrong kind names the accessor that would work; a typo lists what exists
-    @test_throws "is a parameter (get_pars), not a var" get_vars(m, :w)
-    @test_throws "is a variable (get_vars), not a par" get_pars(m, :x)
-    @test_throws "no named variable `nope`" get_vars(m, :nope)
+    @test_throws "is a parameter (parameters), not a var" variables(m, :w)
+    @test_throws "is a variable (variables), not a par" parameters(m, :x)
+    @test_throws "no named variable `nope`" variables(m, :nope)
 
     # extraction from a result object and from a bare vector
     res = (solution = [1.0, 2.0, 3.0, 4.0], multipliers = [7.0],
@@ -357,24 +355,24 @@ end
     @test solution(res, b) == [1.0, 2.0, 3.0, 4.0]
     @test solution(res.solution, b) == [1.0, 2.0, 3.0, 4.0]
     @test multipliers_L(res.multipliers_L, b) == [0.1, 0.2, 0.3, 0.4]
-    @test multipliers(res, get_cons(m, :budget)) == [7.0]
+    @test multipliers(res, constraints(m, :budget)) == [7.0]
     @test multipliers_L(res, b) == [0.1, 0.2, 0.3, 0.4]
     @test multipliers_U(res, b) == [0.5, 0.6, 0.7, 0.8]
 
     # Parameters are live state, per instance.
-    p = get_pars(m, :w)
-    set_value!(m, p, [3.0, 4.0])
-    @test get_value(m, p) == [3.0, 4.0]
+    p = parameters(m, :w)
+    value!(m, p, [3.0, 4.0])
+    @test value(m, p) == [3.0, 4.0]
     m2 = CNLPModel(lib, 4; prefix = "tq")
-    set_value!(m2, get_pars(m2, :w), [9.0, 9.0])
-    @test get_value(m, p) == [3.0, 4.0]          # the first is undisturbed
-    @test_throws DimensionMismatch set_value!(m, p, [1.0])
-    @test_throws "not a parameter" get_value(m, b)
+    value!(m2, parameters(m2, :w), [9.0, 9.0])
+    @test value(m, p) == [3.0, 4.0]          # the first is undisturbed
+    @test_throws DimensionMismatch value!(m, p, [1.0])
+    @test_throws "not a parameter" value(m, b)
 
     # named blocks are optional: `sq` publishes none, and everything else still works
     ms = CNLPModel(lib, 4, 2.0, [1.0, 2.0, 3.0, 4.0]; prefix = "sq")
-    @test keys(get_vars(ms)) == ()
-    @test_throws "publishes no named blocks" get_vars(ms, :x)
+    @test keys(variables(ms)) == ()
+    @test_throws "publishes no named blocks" variables(ms, :x)
     @test ms.meta.nvar == 4
 end
 
@@ -427,9 +425,9 @@ end
 
 @testset "block sizes" begin
     m = CNLPModel(CNLPLib.load(LIBPATH), 4; prefix = "tq")
-    b = get_vars(m, :x)
+    b = variables(m, :x)
     @test length(b) == 4 && size(b) == (4,)
-    @test sum(length, values(get_vars(m))) == m.meta.nvar
+    @test sum(length, values(variables(m))) == m.meta.nvar
 end
 
 @testset "standard solution format (cnlp-solution 0.2)" begin
