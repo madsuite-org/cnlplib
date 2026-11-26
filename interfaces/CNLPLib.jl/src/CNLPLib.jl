@@ -43,7 +43,7 @@ export CNLPModel, argtype, available_models, schema_json, set_path!,
                     "copyout, blas_state, restore_blas!, CompileTrace, ModelProblem, " *
                     "start_multipliers, tracing, report, compile_ns, CNLP_SOLVED, CNLP_ACCEPTABLE, " *
                     "CNLP_INFEASIBLE, CNLP_UNBOUNDED, CNLP_ITERATION_LIMIT, CNLP_TIME_LIMIT, " *
-                    "CNLP_ERROR, CNLP_SOLVER_VERSION, CNLP_DEVICE_CUDA"))
+                    "CNLP_ERROR, CNLP_SOLVER_VERSION, CNLP_DEVICE_CUDA, eval_statements"))
 end
 
 include("patchversion.jl")
@@ -1147,18 +1147,31 @@ let M = CNLPModel{Vector{Float64}, Vector{Int}}, V = Vector{Float64}, W = NamedT
     end
 end
 
-module PrecompileStatements
+"""
+    eval_statements(mod::Module, path) -> Int
+
+Run the `precompile(...)` statements of a file traced with `--trace-compile` (one per line)
+in `mod`, an empty module of the package or image being built, with every loaded package
+bound there by name; a statement naming something that no longer exists is skipped.
+Returns the number of statements that ran.
+"""
+function eval_statements(mod::Module, path::AbstractString)
     for (id, m) in Base.loaded_modules
         name = Symbol(id.name)
-        isdefined(@__MODULE__, name) || Core.eval(@__MODULE__, :(const $name = $m))
+        isdefined(mod, name) || Core.eval(mod, :(const $name = $m))
     end
-    for line in eachline(joinpath(@__DIR__, "precompile_statements.jl"))
+    n = 0
+    for line in eachline(path)
         try
-            Core.eval(@__MODULE__, Meta.parse(line))
+            Core.eval(mod, Meta.parse(line)); n += 1
         catch
         end
     end
+    return n
 end
+
+module PrecompileStatements end
+eval_statements(PrecompileStatements, joinpath(@__DIR__, "precompile_statements.jl"))
 
 include("solver.jl")
 include("precompile.jl")

@@ -401,12 +401,18 @@ ran, 1 for an invalid option, 2 for a failure (the message in the result).
 """
 function serve(solve, model, nopt::Int64, keys::Ptr{Ptr{UInt8}}, vals::Ptr{Ptr{UInt8}}, result::Ptr{CNLPResult};
                options = identity, blas::Vector{String} = String[], trace = nothing, name::AbstractString = "solver")
-    on = trace !== nothing && tracing(trace)
-    t0 = on ? compile_ns() : UInt64(0)
-    restore_blas!(blas)
-    rc = _serve(solve, model, nopt, keys, vals, result, options)
-    on ? report(trace, name, compile_ns() - t0) : (flush(stdout); flush(stderr))
-    return rc
+    # nothing may throw across the C boundary: a failure here is a failed solve
+    try
+        on = trace !== nothing && tracing(trace)
+        t0 = on ? compile_ns() : UInt64(0)
+        restore_blas!(blas)
+        rc = _serve(solve, model, nopt, keys, vals, result, options)
+        on ? report(trace, name, compile_ns() - t0) : (flush(stdout); flush(stderr))
+        return rc
+    catch e
+        set_failure!(result, sprint(showerror, e))
+        return Int64(2)
+    end
 end
 function _serve(solve, model, nopt, keys, vals, result, options)
     opts = try
