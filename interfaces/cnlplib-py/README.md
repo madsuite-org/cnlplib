@@ -17,7 +17,7 @@ import cnlplib
 m = cnlplib.CModel("@lv", "wood", 10000)                    # the registry's lv library, model wood
 m = cnlplib.CModel("@emp", "acp", "pglib_opf_case118_ieee")  # a data-set file, by name
 m = cnlplib.CModel("/path/to/libmymodel.so", 1000)          # a path: library file or bundle dir
-r = cnlplib.solve(m, solver="madnlp", device="cuda")      # r.solution, r.objective
+r = cnlplib.solve(m, solver="madnlp")                    # r.solution, r.objective
 ```
 
 `m` exposes `nvar`, `ncon`, `nnzj`, `nnzh`, `x0`, `lvar`, `uvar`, `lcon`, `ucon`,
@@ -52,11 +52,13 @@ library carries and what each model takes. `m.get_vars()`, `m.get_cons()` and
 `multipliers`, `multipliers_L`, `multipliers_U`, and `m.get_value` / `m.set_value` on
 parameters.
 
-`cnlplib.solve(m, solver="madnlp", device="cuda", **options)` solves with a cnlp solver
-installed in the store (`cnlp install madnlp`, `cnlp install ipopt`), in this process: the
-solver is loaded on first use and kept, so its start-up is paid once, and it calls the model
-library's functions directly (on the GPU through the library's CUDA tier), with no Python in
-between. It returns the status, objective, iterations, solution and multipliers.
+`cnlplib.solve(m, solver="madnlp", **options)` solves with a cnlp solver installed in the
+store (`cnlp install madnlp`, `cnlp install ipopt`), in this process: the solver is loaded on
+first use and kept, so its start-up is paid once, and it calls the model library's functions
+directly, with no Python in between. The solve runs where the model lives: a model created
+with `backend="cuda"` is solved on the GPU, through the library's CUDA tier, by a GPU solver
+(`solver="cumadnlp"`). It returns the status, objective, iterations, solution and multipliers
+(CuPy arrays for a GPU model).
 
 `m.report_instance()` and `m.report_solution(x, y, zl, zu)` are the library's reports (text
 about the instance and about a solution; `""` when it has none). With the library's CUDA

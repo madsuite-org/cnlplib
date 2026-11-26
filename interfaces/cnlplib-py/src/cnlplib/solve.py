@@ -3,8 +3,8 @@
 A solver installed in the store (`cnlp install ipopt`, `cnlp install madnlp`) is loaded once
 and kept: its start-up (a runtime, a GPU warm-up) is paid by the first solve only. The model
 library's own functions are handed to it as the problem's callbacks, so the solver evaluates
-the model with no Python in between, on the CPU or, through the library's device tier, on the
-GPU. They are handed over as they are: a cnlp callback takes `(void* ctx, ...)` and a model
+the model with no Python in between: on the host, or on the GPU (through the library's device
+tier) for a model created with `backend="cuda"`. They are handed over as they are: a cnlp callback takes `(void* ctx, ...)` and a model
 function `(int64_t id, ...)`, which a 64-bit platform passes in the same register, so the
 instance id is the context.
 """
@@ -95,28 +95,21 @@ class Solver:
     def __repr__(self):
         return f"cnlplib.Solver({self.name!r}{', cpu and cuda' if self._solve_d else ''})"
 
-    def solve(self, model, device="auto", x0=None, **options):
-        """Solve `model` (a `CModel`). `device` is `"auto"` (the GPU when the model's library
-        has a CUDA tier and this solver runs there), `"cpu"` or `"cuda"`; `x0` replaces the
-        starting point; other keywords are solver options (`tol=1e-8`, `max_iter=100`)."""
-        if device not in ("auto", "cpu", "cuda"):
-            raise ValueError(f"device is 'auto', 'cpu' or 'cuda', not {device!r}")
+    def solve(self, model, x0=None, **options):
+        """Solve `model` (a `CModel`) where it lives: on the GPU for a model created with
+        `backend="cuda"`, on the host otherwise. `x0` replaces the starting point; other
+        keywords are solver options (`tol=1e-8`, `max_iter=100`)."""
         lib, pre, mid = model._lib, model._prefix, model._id
 
         def fp(name):
             return ctypes.cast(getattr(lib, f"{pre}_{name}"), _vp).value
 
-        has_tier = False
-        if hasattr(lib, f"{pre}_device"):
-            dev = getattr(lib, f"{pre}_device")
-            dev.restype, dev.argtypes = _i64, [_i64]
-            has_tier = int(dev(mid)) == 1
-        on_device = device != "cpu" and self._solve_d is not None and has_tier
-        if device == "cuda" and not on_device:
-            raise ValueError("device='cuda': " + ("the model's library has no CUDA tier (install its -cuda build)"
-                                                  if not has_tier else f"{self.name} does not run on a GPU"))
+        on_device = model.backend == "cuda"
+        if on_device and self._solve_d is None:
+            raise ValueError(f"the model is on the GPU (backend='cuda') and {self.name} does not "
+                             "run there: use a GPU solver (cumadnlp), or a model on the host")
         n, m = model.nvar, model.ncon
-        x0 = np.ascontiguousarray(model.x0 if x0 is None else x0, dtype=np.float64)
+        x0 = np.ascontiguousarray(model.x0 if x0 is None else _host(x0), dtype=np.float64)
         keep = [x0, model.lvar, model.uvar, model.lcon, model.ucon]
         ptr = lambda a: a.ctypes.data
         p = _Problem(_vp(mid), n, m, model.nnzj, model.nnzh, 1 if model.minimize else 0,
@@ -139,6 +132,8 @@ class Solver:
         msg = r.solver_status.decode(errors="replace")
         if rc != 0:
             raise RuntimeError(f"{self.name} failed: {msg}")
+        if on_device:       # the solution where the model lives
+            out = [model._xp.asarray(a) for a in out]
         return Result(status=_STATUS[r.status if 0 <= r.status <= 6 else 6], objective=r.objective,
                       iterations=int(r.iterations), solution=out[0], multipliers=out[1],
                       multipliers_L=out[2], multipliers_U=out[3], solver=self.name, solver_status=msg,
@@ -155,13 +150,17 @@ def load_solver(name):
     return _SOLVERS[name]
 
 
-def solve(model, solver="ipopt", device="auto", x0=None, **options):
-    """Solve `model` (a `CModel`) with the cnlp solver `solver`, in this process; the solver is
-    loaded on first use and kept. See `Solver.solve`.
+def solve(model, solver="ipopt", x0=None, **options):
+    """Solve `model` (a `CModel`) with the cnlp solver `solver`, in this process, where the
+    model lives (its `backend`); the solver is loaded on first use and kept. See `Solver.solve`.
 
-        m = cnlplib.CModel("@emp", "acp", "pglib_opf_case118_ieee")
-        r = cnlplib.solve(m, solver="madnlp", device="cuda")
+        m = cnlplib.CModel("@emp", "acp", "pglib_opf_case118_ieee", backend="cuda")
+        r = cnlplib.solve(m, solver="cumadnlp")
     """
     if sys.maxsize <= 2**32:
         raise RuntimeError("cnlplib.solve needs a 64-bit platform")
-    return load_solver(solver).solve(model, device=device, x0=x0, **options)
+    return load_solver(solver).solve(model, x0=x0, **options)
+
+
+def _host(x):
+    return x.get() if hasattr(x, "get") and not isinstance(x, np.ndarray) else x

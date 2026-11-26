@@ -110,14 +110,15 @@ cnlp solve @nolib:x 1 > "$W/e.log" 2>&1 && bad "a missing library is refused" ||
 PYTHONPATH="$ROOT/interfaces/cnlplib-py/src" "$PY" -c '
 import cnlplib, numpy as np
 m = cnlplib.CModel("@cnlptest", "pn", 6)
-for r in (cnlplib.solve(m), cnlplib.solve(m, tol=1e-10), cnlplib.solve(m, solver="ipopt", device="cpu")):
+for r in (cnlplib.solve(m), cnlplib.solve(m, tol=1e-10), cnlplib.solve(m, solver="ipopt")):
     assert r.status == "solved" and abs(r.objective - 0.5) < 1e-6, r
     assert np.allclose(r.solution, [0.5, 0.5, 1, 1, 1, 1], atol=1e-6) and r.solver == "ipopt" and r.device == "cpu", r
 assert cnlplib.load_solver("ipopt") is cnlplib.load_solver("ipopt")
+m.backend = "cuda"    # a model on the GPU (as backend="cuda" makes one) is not for a host solver
 try:
-    cnlplib.solve(m, device="cuda"); raise SystemExit("device=cuda without a CUDA tier was accepted")
+    cnlplib.solve(m); raise SystemExit("a GPU model went to a host-only solver")
 except ValueError as e:
-    assert "CUDA tier" in str(e), e
+    assert "does not run there" in str(e), e
 ' > "$W/py.log" 2>&1 && ok "Python: cnlplib.solve with an installed solver, loaded once, in-process" || bad "cnlplib.solve: $(cat "$W/py.log")"
 
 # ── cnlp up / remove ────────────────────────────────────────────────────────────
