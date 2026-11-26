@@ -91,11 +91,17 @@ cnlp solve @cnlptest:nope 6 > "$W/e.log" 2>&1 && bad "an unknown model is refuse
 grep -q '^  @cnlptest:pn' "$W/e.log" && ok "an unknown model lists the library's models" || bad "no model list: $(cat "$W/e.log")"
 cnlp solve @cnlptest:ps small $S > "$W/e.log" 2>&1 && bad "only the exact data-set file name is taken" || { grep -q 'no file `small`' "$W/e.log" && grep -q '^  case_small  (cnlptestdata/case_small.txt)' "$W/e.log" && ok "a partial data-set file name is refused, with the file names that contain it" || bad "partial name message: $(cat "$W/e.log")"; }
 cnlp solve @cnlptest:pn 6 --device cuda $S > "$W/e.log" 2>&1 && bad "--device cuda without a device tier is refused" || { grep -q 'no CUDA tier' "$W/e.log" && ok "--device cuda without a device tier is refused" || bad "device message: $(cat "$W/e.log")"; }
-cnlp solve @cnlptest:pn 6 --device tpu $S > "$W/e.log" 2>&1 && bad "an unknown device is refused" || { grep -q 'auto, cpu or cuda' "$W/e.log" && ok "an unknown device is refused" || bad "unknown device message: $(cat "$W/e.log")"; }
+cnlp solve @cnlptest:pn 6 --device tpu $S > "$W/e.log" 2>&1 && bad "an unknown device is refused" || { grep -q 'auto, cpu, cuda or cuda:N' "$W/e.log" && ok "an unknown device is refused" || bad "unknown device message: $(cat "$W/e.log")"; }
 cnlp solve @cnlptest:pn 6 $S > "$W/s.log" 2>&1 && grep -q '(cpu)' "$W/s.log" && ok "without a device tier the solve runs on the cpu, and says so" || bad "cpu solve: $(cat "$W/s.log")"
 grep -q '^times: load model library [0-9.]* s, instantiate [0-9.]* s, load solver [0-9.]* s, solve [0-9.]* s, write [0-9.]* s, total [0-9.]* s$' "$W/s.log" && ok "a solve reports where its time went" || bad "times line: $(cat "$W/s.log")"
 cnlp solve @cnlptest:pb 5 > "$W/e.log" 2>&1 && bad "a wrong number of arguments is refused" || { grep -q 'takes 2' "$W/e.log" && ok "a wrong number of arguments is refused" || bad "argument count message: $(cat "$W/e.log")"; }
 cnlp solve @nolib:x 1 > "$W/e.log" 2>&1 && bad "a missing library is refused" || { grep -q 'cnlp install' "$W/e.log" && ok "a missing library is refused, with what to install" || bad "missing library message: $(cat "$W/e.log")"; }
+printf '@cnlptest:pn 6\n# a comment\n@cnlptest:nope 6\n\n@cnlptest:pb 5 3.0\n' > "$W/batch.txt"
+cnlp solve --batch "$W/batch.txt" --results "$W/batch.tsv" tol=1e-10 $S > "$W/b.log" 2>&1 && bad "a batch with an error exits nonzero" || {
+    grep -q '^batch: 3 instances, 2 solved or acceptable, 0 not, 1 error, ' "$W/b.log" \
+        && [ "$(cut -f1,2 "$W/batch.tsv" | tail -n +2 | tr '\t\n' '|;')" = '@cnlptest:pn 6|solved;@cnlptest:nope 6|error;@cnlptest:pb 5 3.0|solved;' ] \
+        && ok "--batch: one instance per line, an error ends only its line, options apply to every line, --results has a row each" \
+        || bad "batch: $(cat "$W/b.log"; cat "$W/batch.tsv")"; }
 
 # ── cnlp up / remove ────────────────────────────────────────────────────────────
 cnlp up > "$W/u.log" 2>&1 && ok "cnlp up" || bad "cnlp up: $(cat "$W/u.log")"

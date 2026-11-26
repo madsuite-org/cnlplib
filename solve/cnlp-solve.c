@@ -470,7 +470,7 @@ static int run_one(int argc, char** argv) {
     /* the device: the model's device tier with a solver that runs on it. `auto` takes it
      * when both have it (CUDA); `cuda` requires it; `cpu` never takes it. */
     if (strcmp(device, "auto") && strcmp(device, "cpu") && strcmp(device, "cuda"))
-        die("--device is auto, cpu or cuda, not `%s`", device);
+        die("--device is auto, cpu, cuda or cuda:N, not `%s`", device);
     int64_t (*solve_d)(const cnlp_problem*, const cnlp_device_problem*, int64_t, const char* const*,
                        const char* const*, cnlp_result*) = dlsym(sh, "cnlp_solve_device");
     int64_t (*dev)(int64_t) = sym("device");
