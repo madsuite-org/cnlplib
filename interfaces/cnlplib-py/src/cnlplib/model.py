@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -357,7 +358,7 @@ def available_models(library: ctypes.CDLL | str) -> list[str]:
 class BlockRef:
     """A named block of a model (a variable, constraint or parameter): `offset` (0-based)
     and `length` of its slice, `dims` its shape, `index` the library's own numbering, used
-    by `CModel.get_value` / `CModel.set_value`."""
+    by `m[block]` / `m[block] = values`."""
 
     name: str
     kind: str
@@ -368,6 +369,45 @@ class BlockRef:
 
     def __repr__(self):
         return f"BlockRef({self.name!r}, {self.kind}, {'×'.join(map(str, self.dims))} at {self.offset})"
+
+
+_KIND = {"var": "variable", "con": "constraint", "par": "parameter"}
+_PLURAL = {"var": "variables", "con": "constraints", "par": "parameters"}
+
+
+class Blocks(Mapping):
+    """A model's named blocks of one kind (`m.variables`, `m.constraints`,
+    `m.parameters`): a read-only mapping of name to `BlockRef`."""
+
+    __slots__ = ("_kind", "_model")
+
+    def __init__(self, model, kind):
+        self._model, self._kind = model, kind
+
+    def _d(self):
+        return {"var": self._model._vars, "con": self._model._cons, "par": self._model._pars}[self._kind]
+
+    def __getitem__(self, name):
+        d = self._d()
+        if name in d:
+            return d[name]
+        # a name of another kind says where it is; a typo lists what exists
+        for k in ("var", "con", "par"):
+            if k != self._kind and name in Blocks(self._model, k)._d():
+                raise KeyError(f"{name!r} is a {_KIND[k]} (m.{_PLURAL[k]}), not a {_KIND[self._kind]}")
+        raise KeyError(
+            f"this model has no named {_KIND[self._kind]} {name!r}; it has {sorted(d)}"
+            + ("" if d else " (none: this library publishes no named blocks)")
+        )
+
+    def __iter__(self):
+        return iter(self._d())
+
+    def __len__(self):
+        return len(self._d())
+
+    def __repr__(self):
+        return f"{_PLURAL[self._kind]}({', '.join(self._d())})"
 
 
 def _shaped(v, b):
@@ -675,65 +715,49 @@ class CModel:
 
     # ── Named blocks ─────────────────────────────────────────────────────────
 
-    def get_vars(self, name: str | None = None) -> Any:
-        """The model's named variable blocks as a dict of `BlockRef`s, or one by name;
-        empty for a library that publishes none.
+    @property
+    def variables(self) -> Blocks:
+        """The model's named variable blocks, a read-only mapping of name to `BlockRef`
+        (empty for a library that publishes none).
 
             m = cnlplib.CModel("@grid", "acopf", bus)
-            m.get_vars()                       # {"pg": BlockRef, ...}
-            cnlplib.solution(x, m.get_vars("pg"))
+            list(m.variables)                   # ["pg", "qg", ...]
+            cnlplib.solution(x, m.variables["pg"])
         """
-        return self._named("var", name)
+        return Blocks(self, "var")
 
-    def get_cons(self, name: str | None = None) -> Any:
-        """The model's named constraint blocks; see `get_vars`."""
-        return self._named("con", name)
+    @property
+    def constraints(self) -> Blocks:
+        """The model's named constraint blocks; see `variables`."""
+        return Blocks(self, "con")
 
-    def get_pars(self, name: str | None = None) -> Any:
-        """The model's named parameter blocks; see `get_vars`."""
-        return self._named("par", name)
+    @property
+    def parameters(self) -> Blocks:
+        """The model's named parameter blocks; see `variables`. Their values are `m[block]`."""
+        return Blocks(self, "par")
 
-    def _named(self, kind, name):
-        d = {"var": self._vars, "con": self._cons, "par": self._pars}[kind]
-        if name is None:
-            return dict(d)
-        if name in d:
-            return d[name]
-        # a name of another kind names the accessor that would work; a typo lists what exists
-        for k, other in (("var", self._vars), ("con", self._cons), ("par", self._pars)):
-            if name in other:
-                what = {
-                    "var": "variable (get_vars)",
-                    "con": "constraint (get_cons)",
-                    "par": "parameter (get_pars)",
-                }[k]
-                raise ValueError(f"{name!r} is a {what}, not a {kind}")
-        what = {"var": "variable", "con": "constraint", "par": "parameter"}[kind]
-        raise ValueError(
-            f"this model has no named {what} {name!r}; it has {sorted(d)}"
-            + ("" if d else " (none: this library publishes no named blocks)")
-        )
-
-    def get_value(self, block: BlockRef | str) -> np.ndarray:
-        """A copy of a parameter block's values (a `BlockRef`, or its name)."""
+    def __getitem__(self, block: BlockRef | str) -> np.ndarray:
+        """A copy of a parameter block's values: `m[m.parameters["w"]]`, or `m["w"]`."""
         b = self._par_block(block)
         out = np.zeros(b.length)
         fn = _f(self._lib, self._prefix, "get_value", [_c_int, _c_int, _pd, _c_int])
         _check(fn(self._id, _c_int(b.index), _arr(out), _c_int(b.length)), f"{self._prefix}_get_value")
         return _shaped(out, b)
 
-    def set_value(self, block: BlockRef | str, values: Any) -> None:
-        """Update a parameter block's values, for every later evaluation of this instance."""
+    def __setitem__(self, block: BlockRef | str, values: Any) -> None:
+        """Update a parameter block's values (`m["w"] = v`), for every later evaluation of
+        this instance."""
         b = self._par_block(block)
         v = np.ascontiguousarray(np.ravel(values), dtype=np.float64)
         if v.size != b.length:
             raise ValueError(f"parameter {b.name!r} has {b.length} elements, got {v.size}")
         fn = _f(self._lib, self._prefix, "set_value", [_c_int, _c_int, _pd, _c_int])
         _check(fn(self._id, _c_int(b.index), _arr(v), _c_int(b.length)), f"{self._prefix}_set_value")
-        return self
 
     def _par_block(self, block):
-        b = self.get_pars(block) if isinstance(block, str) else block
+        b = self.parameters[block] if isinstance(block, str) else block
+        if not isinstance(b, BlockRef):
+            raise TypeError(f"a parameter block (BlockRef) or its name, not {type(block).__name__}")
         if b.kind != "par":
-            raise ValueError(f"{b.name!r} is a {b.kind}, not a parameter")
+            raise ValueError(f"{b.name!r} is a {_KIND[b.kind]}, not a parameter")
         return b

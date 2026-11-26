@@ -8,6 +8,7 @@ numpy in, numpy out, structure indices 0-based (the ABI's are 1-based).
 
 from .model import (
     BlockRef,
+    Blocks,
     CModel,
     argtype,
     available_models,
@@ -27,6 +28,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "BlockRef",
+    "Blocks",
     "CModel",
     "Result",
     "Solver",

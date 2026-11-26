@@ -49,10 +49,11 @@ m = cnlplib.CModel(
 ```
 
 `available_models(lib)`, `argtype(lib, "wood")` and `schema(lib, "wood")` say what a
-library carries and what each model takes. `m.get_vars()`, `m.get_cons()` and
-`m.get_pars()` are the model's named blocks, for `solution(x, m.get_vars("pg"))`,
-`multipliers`, `multipliers_lower`, `multipliers_upper`, and `m.get_value` / `m.set_value` on
-parameters.
+library carries and what each model takes. `m.variables`, `m.constraints` and
+`m.parameters` are the model's named blocks, read-only mappings of name to `BlockRef`, for
+`solution(x, m.variables["pg"])`, `multipliers`, `multipliers_lower` and
+`multipliers_upper`. A parameter's values are `m["w"]` (or `m[block]`), and `m["w"] = v`
+updates them for every later evaluation.
 
 `cnlplib.solve(m, solver="madnlp", **options)` solves with a cnlp solver installed in the
 store (`cnlp install madnlp`, `cnlp install ipopt`), in this process: the solver is loaded on
