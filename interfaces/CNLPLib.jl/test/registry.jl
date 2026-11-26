@@ -1,14 +1,16 @@
 # Libraries from the cnlplib registry, against a registry served from local files laid out as
 # the releases are: an index, a release with its SHA256SUMS, a shared artifact the library
 # names in its ARTIFACTS file, and a data set the library requires. Everything is installed
-# into a temporary CNLPLIB_HOME, in the layout the `cnlp` command uses.
+# into a temporary CNLPLIB_HOME by this repository's `cnlp` command (bin/cnlp).
 using CNLPLib: install, update!, data_file
+using SHA: sha256
+_sha(f) = bytes2hex(open(sha256, f))
 
 @testset "the registry, installed into CNLPLIB_HOME" begin
     root = mktempdir()
     home = mktempdir()
     try
-        plat = CNLPLib._platform()
+        plat = (Sys.islinux() ? "linux" : "macos") * "-" * (Sys.ARCH === :x86_64 ? "x86_64" : "aarch64")
         rel = mkpath(joinpath(root, "releases"))
         stage = mktempdir()
         tgz(dir, name, out) = run(`tar -czf $out -C $dir $name`)
@@ -26,10 +28,10 @@ using CNLPLib: install, update!, data_file
         tgz(stage, "regdata", joinpath(rel, "regdata.tar.gz"))
         open(joinpath(rel, "SHA256SUMS"), "w") do io
             for f in readdir(rel)
-                f == "SHA256SUMS" || println(io, CNLPLib._hex(joinpath(rel, f)), "  ", f)
+                f == "SHA256SUMS" || println(io, _sha(joinpath(rel, f)), "  ", f)
             end
             # a release whose bytes are not what its SHA256SUMS says
-            println(io, CNLPLib._hex(joinpath(rel, "regqp-$plat.tar.gz")), "  badqp-$plat.tar.gz")
+            println(io, _sha(joinpath(rel, "regqp-$plat.tar.gz")), "  badqp-$plat.tar.gz")
         end
         write(joinpath(rel, "badqp-$plat.tar.gz"), "not the release")
         u(f) = "file://" * joinpath(rel, f)
@@ -39,7 +41,8 @@ using CNLPLib: install, update!, data_file
             "regdata\tlatest\tany\t$(u("regdata.tar.gz"))\t-\ta test data set\tdata\t\t-\t-",
         ], "\n") * "\n")
         withenv("CNLPLIB_INDEX" => "file://" * joinpath(root, "index.tsv"), "CNLPLIB_DEVICE" => "cpu",
-                "CNLPLIB_HOME" => home, "CNLPLIB_PATH" => nothing) do
+                "CNLPLIB_HOME" => home, "CNLPLIB_PATH" => nothing,
+                "PATH" => joinpath(ROOT, "bin") * ":" * ENV["PATH"]) do
             CNLPLib.set_path!()
             m = CNLPModel("@regqp", 4; prefix = "tq")      # downloaded on first use
             @test m.meta.nvar == 4
@@ -64,8 +67,8 @@ using CNLPLib: install, update!, data_file
             mv(joinpath(root, "index.off"), joinpath(root, "index.tsv"))
             @test update!("regqp") == dir
             # bytes that do not match the published checksum are refused
-            err = try install("badqp"); nothing catch e; sprint(showerror, e) end
-            @test err !== nothing && occursin("checksum mismatch", err)
+            @test_throws ErrorException install("badqp")
+            @test !isdir(joinpath(home, "lib", "badqp"))
             # an unknown name says so
             @test_throws ErrorException CNLPLib.lib("nonexistent")
         end

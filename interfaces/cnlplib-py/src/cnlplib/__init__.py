@@ -2,7 +2,8 @@
 
 The producer is typically ExaModels' recorder compiled with
 ``ExaModels.compile_library`` (Julia), but any library implementing the ABI
-works — see ``tests/fixtures/tinyqp.c`` for a complete plain-C reference.
+works — see ``conformance/tinyqp.c`` in the cnlplib repository for a complete plain-C
+reference.
 This package needs **no Julia**: the library is self-contained and this
 wrapper is ctypes + numpy.
 

@@ -1,4 +1,5 @@
 """Hermetic tests against the plain-C reference library (no Julia anywhere)."""
+import os
 import pathlib
 import shutil
 import subprocess
@@ -10,7 +11,9 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).parents[1] / "src"))
 import cnlplib
 
-FIX = pathlib.Path(__file__).parent / "fixtures" / "tinyqp.c"
+# the shared fixture (conformance/tinyqp.c), compiled against this repository's cnlp.h
+ROOT = pathlib.Path(__file__).resolve().parents[3]
+FIX = ROOT / "conformance" / "tinyqp.c"
 
 
 @pytest.fixture(scope="module")
@@ -18,7 +21,7 @@ def sopath(tmp_path_factory):
     cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
     assert cc, "no C compiler available"
     so = tmp_path_factory.mktemp("lib") / "libtinyqp.so"
-    subprocess.run([cc, "-shared", "-fPIC", "-O2", "-o", str(so), str(FIX)], check=True)
+    subprocess.run([cc, "-shared", "-fPIC", "-O2", f"-I{ROOT}", "-o", str(so), str(FIX)], check=True)
     return so
 
 
@@ -106,7 +109,8 @@ def test_name_based_loading(lib, tmp_path):
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv("CNLPLIB_INDEX", empty.as_uri())
         mp.setenv("CNLPLIB_HOME", str(tmp_path / "home"))
-        with pytest.raises(FileNotFoundError, match="cnlplib index"):
+        mp.setenv("PATH", f"{ROOT / 'bin'}:{os.environ['PATH']}")
+        with pytest.raises(RuntimeError, match="cnlp install nonexistent"):
             cnlplib.lib("nonexistent")
 
 

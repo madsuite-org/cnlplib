@@ -1,7 +1,7 @@
 /*
- * Minimal reference implementation of the CNLPLib C ABI, in plain C —
- * both a hermetic test fixture and documentation-by-example that the ABI is
- * language-neutral.
+ * Minimal reference implementation of the cnlp C ABI (cnlp.h), in plain C —
+ * the test fixture of the Julia and Python interfaces, and documentation by
+ * example that the ABI is language-neutral.
  *
  *   min  sum_i (x_i - 1)^2   s.t.  x_1 + x_2 = 1        (n >= 2 variables)
  *
@@ -13,9 +13,9 @@
 #include <math.h>
 
 /* ── cnlp v0.2 conformance ─────────────────────────────────────────────────
- * The spec header is vendored beside this file (byte-identical to cnlp.h at
- * cnlplib's cnlp.h, ABI 0.2); expanding the declarations makes any signature
- * drift between this fixture and the spec a COMPILE error in the suites.
+ * Compiled against this repository's cnlp.h (`-I` its root); expanding the
+ * declarations makes any signature drift between this fixture and the spec a
+ * COMPILE error in the suites.
  * sq and tb are builder-only by design (no P_new), so only their builder
  * tier is macro-checked; the partial prefixes (bf, ns, nf, zz) exercise
  * failure paths and are deliberately not conformant models.

@@ -5,11 +5,13 @@ using LinearAlgebra
 using MadNLP
 
 # Build the hermetic C fixture (no Julia involved on the producer side).
-const FIXDIR = joinpath(@__DIR__, "fixtures")
+# the shared fixture (conformance/tinyqp.c), compiled against this repository's cnlp.h
+const ROOT = normpath(joinpath(@__DIR__, "..", "..", ".."))
+const FIXDIR = joinpath(ROOT, "conformance")
 const LIBPATH = joinpath(mktempdir(), "libtinyqp.so")
 cc = something(Sys.which("cc"), Sys.which("gcc"), Sys.which("clang"))
 @test cc !== nothing
-run(`$cc -shared -fPIC -O2 -o $LIBPATH $(joinpath(FIXDIR, "tinyqp.c"))`)
+run(`$cc -shared -fPIC -O2 -I$ROOT -o $LIBPATH $(joinpath(FIXDIR, "tinyqp.c"))`)
 
 @testset "CNLPLib" begin
     lib = CNLPLib.load(LIBPATH)
@@ -339,7 +341,7 @@ end
         libjulia = realpath(Libdl.dlpath("libjulia"))
         ver = "$(VERSION.major).$(VERSION.minor)"
         linked = joinpath(mktempdir(), "libtinyqp_jl.so")
-        run(`$cc -shared -fPIC -O2 -o $linked $(joinpath(FIXDIR, "tinyqp.c"))
+        run(`$cc -shared -fPIC -O2 -I$ROOT -o $linked $(joinpath(FIXDIR, "tinyqp.c"))
              -Wl,--no-as-needed $libjulia`)
         @test CNLPLib._stdlinked_libjulia(linked) == ver
     end

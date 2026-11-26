@@ -1,10 +1,11 @@
 """Libraries from the cnlplib registry, against a registry served from local files laid out as
 the releases are: an index, a release with its SHA256SUMS, a shared artifact the library names
 in its ARTIFACTS file, and a data set the library requires. Everything is installed into a
-temporary CNLPLIB_HOME, in the layout the `cnlp` command and CNLPLib.jl use."""
+temporary CNLPLIB_HOME by this repository's `cnlp` command (bin/cnlp)."""
 import hashlib
 import os
 import pathlib
+import platform
 import shutil
 import subprocess
 import sys
@@ -16,7 +17,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).parents[1] / "src"))
 import cnlplib
 from cnlplib import registry
 
-FIX = pathlib.Path(__file__).parent / "fixtures" / "tinyqp.c"
+ROOT = pathlib.Path(__file__).resolve().parents[3]
+FIX = ROOT / "conformance" / "tinyqp.c"
 SHARED = "shared_x-0123456789abcdef"
 
 
@@ -33,11 +35,12 @@ def _tgz(src_dir, name, out):
 def reg(tmp_path, monkeypatch):
     cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
     assert cc, "no C compiler available"
-    plat = registry._platform()
+    plat = {"linux": "linux", "darwin": "macos"}[sys.platform] + "-" + \
+        {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}[platform.machine().lower()]
     rel, stage, home = tmp_path / "releases", tmp_path / "stage", tmp_path / "home"
     for d in (rel, stage / "regqp" / "lib", stage / SHARED, stage / "regdata" / "cases"):
         d.mkdir(parents=True)
-    subprocess.run([cc, "-shared", "-fPIC", "-O2", "-o", str(stage / "regqp" / "lib" / "libregqp.so"),
+    subprocess.run([cc, "-shared", "-fPIC", "-O2", f"-I{ROOT}", "-o", str(stage / "regqp" / "lib" / "libregqp.so"),
                     str(FIX)], check=True)
     (stage / "regqp" / "ARTIFACTS").write_text(f"{SHARED} lib/extra\n")
     (stage / SHARED / "note.txt").write_text("shared\n")
@@ -61,6 +64,7 @@ def reg(tmp_path, monkeypatch):
     monkeypatch.setenv("CNLPLIB_HOME", str(home))
     monkeypatch.delenv("CNLPLIB_PATH", raising=False)
     monkeypatch.delenv("CNLPMODELS_PATH", raising=False)
+    monkeypatch.setenv("PATH", f"{ROOT / 'bin'}:{os.environ['PATH']}")
     cnlplib.set_path()
     yield home, index
     cnlplib.set_path()
@@ -99,5 +103,7 @@ def test_offline_after_install_and_updates(reg):
 
 
 def test_bytes_not_matching_the_published_checksum_are_refused(reg):
-    with pytest.raises(RuntimeError, match="checksum mismatch"):
+    home, _ = reg
+    with pytest.raises(RuntimeError, match="cnlp install badqp"):
         cnlplib.install("badqp")
+    assert not (home / "lib" / "badqp").exists()

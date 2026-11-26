@@ -12,7 +12,7 @@ NLPModels-compatible solver (Ipopt via NLPModelsIpopt, or any other) can
 solve it in Julia.
 
 Any library implementing the [cnlp ABI](https://cnlplib.madsuite.org) works, in any source language:
-`test/fixtures/tinyqp.c` in this repository is a complete reference
+`conformance/tinyqp.c` in this repository is a complete reference
 implementation in ~100 lines of plain C.
 
 ```julia
@@ -25,13 +25,12 @@ m = CNLPModel("@mymodel", 1000)            # resolves libmymodel.so, instance of
 res = ipopt(m)
 ```
 
-**Libraries from the [cnlplib registry](https://cnlplib.madsuite.org/registry/)** need no
-separate install step: a name that is neither on the path nor installed is installed on first
-use, into `$CNLPLIB_HOME` (default `~/.cnlplib`) exactly as `cnlp install` would, with the
-data sets it requires, after checking it against the SHA-256 its release publishes. One copy
-serves the `cnlp` command, Julia and Python, and is found offline afterwards. The library's
-CUDA build is taken on a machine with an NVIDIA GPU (`CNLPLIB_DEVICE=cpu` takes the host
-build). `name@nightly` is the nightly build; `CNLPLib.update!("lv")` fetches a newer release.
+**Libraries from the [cnlplib registry](https://cnlplib.madsuite.org/registry/)** are
+installed on first use: a name that is neither on the path nor installed in `$CNLPLIB_HOME`
+(default `~/.cnlplib`) is installed there with `cnlp install`, so one copy, from one
+installer, serves the `cnlp` command, Julia and Python. This needs the `cnlp` command
+(`curl -fsSL https://cnlplib.madsuite.org/install | sh`). `name@nightly` is the nightly
+build; `CNLPLib.update!("lv")` fetches a newer release.
 
 ```julia
 m = CNLPModel("@lv@nightly", :wood, 10000)
@@ -133,12 +132,12 @@ on the GPU.
 
 This package implements **cnlp ABI 0.2**:
 [`cnlp.h`](https://github.com/madsuite-org/cnlplib/blob/main/cnlp.h) is the
-specification. A copy is vendored at `test/fixtures/cnlp.h`, where the fixture expands its
-declarations so signature drift fails compilation.
+specification. The test fixture, `conformance/tinyqp.c`, is compiled against it and expands
+its declarations, so signature drift fails compilation.
 
 ## Implementing a compatible library
 
-Follow `cnlp.h`, and check yourself against `test/fixtures/tinyqp.c` and this package's
+Follow `cnlp.h`, and check yourself against `conformance/tinyqp.c` and this package's
 test suite, which compiles that file and exercises every function against closed-form
 solutions. The file carries four models: `tq_` (instantiated from one integer), `sq_`
 (built from a three-field schema through the builder), `fx_` (no instantiation data) and

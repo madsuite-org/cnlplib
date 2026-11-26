@@ -13,7 +13,7 @@ pip install "git+https://github.com/madsuite-org/cnlplib#subdirectory=interfaces
 
 No language runtime is required beyond Python itself: the wrapper is
 ctypes + numpy, and any library implementing the ABI below works, whatever
-language produced it. `tests/fixtures/tinyqp.c` in this repository is a
+language produced it. `conformance/tinyqp.c` in this repository is a
 complete reference implementation in ~100 lines of plain C, and the test
 suite compiles and exercises it end to end.
 
@@ -33,14 +33,12 @@ x, info = cnlplib.solve_ipopt(m)         # cyipopt, if installed
 numpy out, structure indices 0-based per Python convention. Any number of
 model instances may coexist per library.
 
-**Libraries from the [cnlplib registry](https://cnlplib.madsuite.org/registry/)** need no
-separate install step: a name that is neither on the path nor installed is installed on first
-use, into `$CNLPLIB_HOME` (default `~/.cnlplib`) exactly as `cnlp install` would, with the
-data sets it requires, after checking it against the SHA-256 its release publishes. One copy
-serves the `cnlp` command, Julia (CNLPLib.jl) and Python, and is found offline afterwards. The
-library's CUDA build is taken on a machine with an NVIDIA GPU (`CNLPLIB_DEVICE=cpu` takes the
-host build); `name@nightly` is the nightly build, and `cnlplib.update("lv")` fetches a newer
-release.
+**Libraries from the [cnlplib registry](https://cnlplib.madsuite.org/registry/)** are
+installed on first use: a name that is neither on the path nor installed in `$CNLPLIB_HOME`
+(default `~/.cnlplib`) is installed there with `cnlp install`, so one copy, from one
+installer, serves the `cnlp` command, Julia and Python. This needs the `cnlp` command
+(`curl -fsSL https://cnlplib.madsuite.org/install | sh`). `name@nightly` is the nightly
+build; `cnlplib.update("lv")` fetches a newer release.
 
 ```python
 m = cnlplib.CModel("@lv@nightly", "wood", 10000)
@@ -51,8 +49,8 @@ m = cnlplib.CModel("@emp@nightly", "acp", "pglib_opf_case118_ieee")   # a data-s
 
 This package consumes **cnlp ABI 0.2**: [`cnlp.h`](https://github.com/madsuite-org/cnlplib/blob/main/cnlp.h)
 is the specification (every integer is `int64_t`, indices are 1-based inside the ABI and
-0-based here). A copy is vendored at `tests/fixtures/cnlp.h`, which the fixture compiles
-against so signature drift fails the build.
+0-based here). The test fixture, `conformance/tinyqp.c`, is compiled against it, so
+signature drift fails the build.
 
 `m.minimize` is the objective sense (`P_minimize`; a library without it minimizes).
 
@@ -91,7 +89,7 @@ spelling as CNLPLib.jl's `CNLPModel(lib, :acopf, ...)`.
 
 ## Implementing a compatible library
 
-Follow `cnlp.h`, and validate against `tests/fixtures/tinyqp.c` and this test suite,
+Follow `cnlp.h`, and validate against `conformance/tinyqp.c` and this test suite,
 which compiles that file and checks every function against closed-form values.
 
 Sibling package: [CNLPLib.jl](../CNLPLib.jl) — the same consumer for Julia.

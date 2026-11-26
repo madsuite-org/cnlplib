@@ -4,7 +4,6 @@ version = "0.4.0"
 authors = ["Sungho Shin <sushin@mit.edu>"]
 
 [deps]
-Downloads = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Mmap = "a63ad114-7e13-5084-954f-fe012c677804"
@@ -12,10 +11,7 @@ NLPModels = "a4795742-8479-5a88-8948-cc11e1c8c1a6"
 ObjectFile = "d8793406-e978-5875-9003-1fc021f44a92"
 Patchelf_jll = "f2cf89d6-2bfd-5c44-bd2c-068eea195c0c"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
-SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 StructIO = "53d494c1-5632-5724-8f4c-31dff12d585f"
-Tar = "a4e569a6-e804-4fa4-b0f3-eef7a1d5b13e"
-p7zip_jll = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 
 [weakdeps]
 CUDACore = "bd0ed864-bdfe-4181-a5ed-ce625a5fdea2"
@@ -26,8 +22,8 @@ CNLPLibCUDAExt = "CUDACore"
 CNLPLibHDF5Ext = "HDF5"
 
 [compat]
+SHA = "0.7, 1"
 CUDACore = "6"
-Downloads = "1"
 HDF5 = "0.17"
 Libdl = "1"
 LinearAlgebra = "1"
@@ -36,16 +32,14 @@ NLPModels = "0.21"
 ObjectFile = "0.5"
 Patchelf_jll = "0.18"
 Random = "1"
-SHA = "0.7, 1"
 StructIO = "0.3"
-Tar = "1"
 julia = "1.10"
-p7zip_jll = "16, 17"
 
 [extras]
+SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 MadNLP = "2621e9c9-9eb4-46b1-8089-e8c72242dfb6"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["HDF5", "MadNLP", "Test"]
+test = ["HDF5", "MadNLP", "SHA", "Test"]
