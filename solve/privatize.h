@@ -153,7 +153,8 @@ static int pv_edit(const char* p) {
 
 static void pv_clear(pv_list* l) { for (int k = 0; k < l->n; k++) free(l->v[k]); l->n = 0; }
 
-/* one scope: its names, its files edited, a link under each new name */
+/* one scope: its names (and the prefixes of their providers) recorded, its files edited */
+static pv_list PV_ALL_ENTRIES, PV_ALL_PREFIXES;
 static int pv_scope(const char* dir) {
     pv_clear(&PV_FILES); pv_clear(&PV_NAMES); pv_clear(&PV_PREFIX); pv_clear(&PV_ENTRIES);
     if (!isdir(dir)) return 0;
@@ -161,12 +162,27 @@ static int pv_scope(const char* dir) {
     int changed = 0;
     for (int k = 0; k < PV_FILES.n; k++) changed += pv_edit(PV_FILES.v[k]);
     for (int k = 0; k < PV_ENTRIES.n; k++) {
-        const char* e = PV_ENTRIES.v[k]; const char* base = strrchr(e, '/') + 1;
-        char link[PATH_MAX]; snprintf(link, sizeof link, "%.*s%s%s", (int)(base - e), e, PV_PREFIX.v[k], base + 3);
-        struct stat ls;
-        if (lstat(link, &ls) && !symlink(base, link)) PV_LINKS++;
+        pv_push(&PV_ALL_ENTRIES, PV_ENTRIES.v[k]);
+        int seen = 0;
+        for (int j = 0; j < PV_ALL_PREFIXES.n; j++) seen |= !strcmp(PV_ALL_PREFIXES.v[j], PV_PREFIX.v[k]);
+        if (!seen) pv_push(&PV_ALL_PREFIXES, PV_PREFIX.v[k]);
     }
     return changed;
+}
+
+/* A link under every private name beside every entry with the old one, to that entry. The
+ * loader looks a needed name up in the directory of the link a library was loaded through
+ * ($ORIGIN), and a library may carry its own copy of a runtime library (a newer libstdc++), so
+ * whichever private name asks for it there finds the copy that directory chose. */
+static void pv_links(void) {
+    for (int k = 0; k < PV_ALL_ENTRIES.n; k++) {
+        const char* e = PV_ALL_ENTRIES.v[k]; const char* base = strrchr(e, '/') + 1;
+        for (int j = 0; j < PV_ALL_PREFIXES.n; j++) {
+            char link[PATH_MAX]; snprintf(link, sizeof link, "%.*s%s%s", (int)(base - e), e, PV_ALL_PREFIXES.v[j], base + 3);
+            struct stat ls;
+            if (lstat(link, &ls) && !symlink(base, link)) PV_LINKS++;
+        }
+    }
 }
 
 static void pv_subdirs(pv_list* dirs, const char* kind, const char* sub) {
@@ -188,6 +204,7 @@ static int privatize(int nargs, char** args) {
     pv_subdirs(&dirs, "artifacts", ""); pv_subdirs(&dirs, "lib", "/lib"); pv_subdirs(&dirs, "solvers", "/lib");
     int changed = 0;
     for (int k = 0; k < dirs.n; k++) changed += pv_scope(dirs.v[k]);
+    pv_links();
     if (changed || PV_LINKS) printf("Gave the bundled libraries private names (%d files, %d links)\n", changed, PV_LINKS);
     return 0;
 }
