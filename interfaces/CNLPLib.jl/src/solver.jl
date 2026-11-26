@@ -335,7 +335,7 @@ records its state when it loads (`__init__`) and restores it before every solve:
 runtime in the process (a model library) may open the same libblastrampoline by name when it
 starts and forward it elsewhere, or nowhere.
 """
-blas_state() = String[l.libname for l in LinearAlgebra.BLAS.get_config().loaded_libs]
+blas_state() = String[l.libname for l in LinearAlgebra.BLAS.lbt_get_config().loaded_libs]   # live, not the cached get_config()
 function restore_blas!(state::Vector{String})
     (isempty(state) || blas_state() == state) && return nothing
     for (k, l) in enumerate(state)
