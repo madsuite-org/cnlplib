@@ -335,7 +335,18 @@ records its state when it loads (`__init__`) and restores it before every solve:
 runtime in the process (a model library) may open the same libblastrampoline by name when it
 starts and forward it elsewhere, or nowhere.
 """
-blas_state() = String[l.libname for l in LinearAlgebra.BLAS.lbt_get_config().loaded_libs]   # live, not the cached get_config()
+# read from libblastrampoline itself: Julia's `lbt_get_config()` is a copy, refreshed only by
+# this runtime's own `lbt_forward`, so it misses a forward made by another runtime
+function blas_state()
+    config = ccall((:lbt_get_config, LinearAlgebra.BLAS.libblastrampoline), Ptr{Ptr{Ptr{Cvoid}}}, ())
+    libs, out = unsafe_load(config), String[]   # lbt_config_t starts with its NULL-ended loaded_libs,
+    i = 1                                       # each an lbt_library_info_t that starts with libname
+    while (lib = unsafe_load(libs, i)) != C_NULL
+        push!(out, unsafe_string(unsafe_load(Ptr{Cstring}(lib))))
+        i += 1
+    end
+    return out
+end
 function restore_blas!(state::Vector{String})
     (isempty(state) || blas_state() == state) && return nothing
     for (k, l) in enumerate(state)

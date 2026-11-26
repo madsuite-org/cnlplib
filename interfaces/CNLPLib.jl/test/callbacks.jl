@@ -103,6 +103,14 @@ end
     @test !isempty(st)
     CNLPLib.restore_blas!(st)
     @test CNLPLib.blas_state() == st
+    # another runtime forwards libblastrampoline behind this one's back (MadNLP's MUMPS has
+    # added its LP64 OpenBLAS here, so there are two libraries to lose one of)
+    @test length(st) >= 2
+    ccall((:lbt_forward, LinearAlgebra.BLAS.libblastrampoline), Int32, (Cstring, Int32, Int32, Ptr{Cvoid}),
+          st[1], 1, 0, C_NULL)
+    @test CNLPLib.blas_state() == st[1:1]
+    CNLPLib.restore_blas!(st)
+    @test CNLPLib.blas_state() == st
     x, y, zl, zu = zeros(2), zeros(1), zeros(2), zeros(2)
     r = Ref(CNLPResult(pointer(x), pointer(y), pointer(zl), pointer(zu), 0.0, -1, -1, ntuple(_ -> 0x00, 128)))
     ks, vs = ["tol"], ["1e-8"]
