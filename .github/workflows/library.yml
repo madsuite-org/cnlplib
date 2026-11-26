@@ -66,8 +66,8 @@ on:
         default: main
         type: string
       max-ptx:
-        description: Newest PTX ISA a device build may carry (7.8 is CUDA 11.8's; a driver older than the ISA cannot load the kernels)
-        default: "7.8"
+        description: Newest PTX ISA a device build may carry (8.1 is CUDA 12.1's, what ExaModelsCompiler 0.4.3 emits; a driver older than the ISA cannot load the kernels)
+        default: "8.1"
         type: string
 
 permissions:
