@@ -1102,6 +1102,12 @@ let M = CNLPModel{Vector{Float64}, Vector{Int}}, V = Vector{Float64}, W = NamedT
                                       (Symbol, String, String), (Symbol,), ())
         precompile(CNLPModel, (L, args...))
     end
+    # named blocks and the library's reports
+    for f in (get_vars, get_cons, get_pars), a in ((), (Symbol,), (String,))
+        precompile(f, (M, a...))
+    end
+    precompile(get_value, (M, BlockRef)); precompile(set_value!, (M, BlockRef, V))
+    precompile(report_instance, (M,))
     precompile(Core.kwcall, (NamedTuple{(:prefix,), Tuple{String}}, Type{CNLPModel}, CLib, Int))
     for (f, args) in (
         (NLPModels.obj, (M, V)), (NLPModels.grad, (M, V)), (NLPModels.grad!, (M, V, V)),

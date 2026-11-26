@@ -5,6 +5,7 @@ attributes, the `/solution` group ExaModelsIO also uses, and `/blocks/<kind>/<na
 module CNLPLibHDF5Ext
 
 using CNLPLib, HDF5
+import PrecompileTools
 
 function CNLPLib._write_standard(path::AbstractString, r)
     h5open(path, "w") do f
@@ -27,6 +28,17 @@ function CNLPLib._write_standard(path::AbstractString, r)
         end
     end
     return path
+end
+
+# the standard solution file, with one block of each field layout
+PrecompileTools.@compile_workload begin
+    v = Pair{String, Array{Float64}}["value" => zeros(2), "multiplier_L" => zeros(2)]
+    r = (; library = "toy", model = "toy", nvar = 2, ncon = 1, minimize = true, objective = 0.0,
+         status = "solved", solver_status = "toy", iterations = 1, x = zeros(2), y = zeros(1),
+         zl = zeros(2), zu = zeros(2), blocks = [("variables", "x", v)])
+    path = tempname() * ".h5"
+    CNLPLib._write_standard(path, r)
+    rm(path; force = true)
 end
 
 end # module
