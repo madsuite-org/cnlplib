@@ -24,6 +24,7 @@ configuration and [`CNLPModel`](@ref) restores it after the first call;
 module CNLPLib
 
 using Libdl
+import Mmap
 using LinearAlgebra
 using PrecompileTools: @setup_workload, @compile_workload
 import NLPModels: NLPModels, AbstractNLPModel, NLPModelMeta, Counters,
@@ -46,9 +47,7 @@ export CNLPModel, argtype, available_models, schema_json, set_path!,
                     "CNLP_ERROR, CNLP_SOLVER_VERSION, CNLP_DEVICE_CUDA, eval_statements"))
 end
 
-include("patchversion.jl")
 include("registry.jl")
-include("private_runtime.jl")
 
 """
     CLib
@@ -118,14 +117,25 @@ end
 Snapshot the host's BLAS configuration, then `dlopen` the library with
 `RTLD_LOCAL | RTLD_DEEPBIND`.
 
-An unbundled juliac library (linked against the standard `libjulia`) would abort the
-process on its first call; on Linux and macOS `load` gives it a private copy of the
-installed Julia runtime instead (same Julia version required, see `private_runtime.jl`).
-Elsewhere the unbundled form is refused.
+A juliac library must be a bundle (`juliac --bundle`, as the registry ships them), which
+carries a Julia runtime of its own; an unbundled one, linked against the standard
+`libjulia`, would share this session's runtime and abort the process, so it is refused.
 """
+# Whether a library asks for the standard libjulia by name (a bundle's libjulia has a salted
+# name; a plain C library asks for none): the name, NUL-terminated, in its string table.
+function _unbundled(path::AbstractString)
+    isfile(path) || return false
+    bytes = Mmap.mmap(path)
+    return any(n -> findfirst(n, bytes) !== nothing,
+               (b"\0libjulia.so.1", b"/libjulia.1.", b"\0libjulia.1."))
+end
+
 function load(path::AbstractString)
+    _unbundled(path) && throw(ArgumentError(
+        "$path is an unbundled juliac library (it links the standard libjulia): build it as a " *
+        "bundle (`juliac --bundle`), which carries its own Julia runtime"))
     blas_libs = [l.libname for l in BLAS.get_config().loaded_libs]
-    handle = _dlopen_model(String(path), Libdl.RTLD_LOCAL | Libdl.RTLD_DEEPBIND)
+    handle = Libdl.dlopen(String(path), Libdl.RTLD_LOCAL | Libdl.RTLD_DEEPBIND)
     return CLib(String(path), handle, blas_libs)
 end
 

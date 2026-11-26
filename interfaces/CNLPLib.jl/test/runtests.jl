@@ -312,24 +312,20 @@ end
     @test neval_jac_nln(m) == 1 && neval_jac(m) == nj   # counted once, as the nonlinear one
 end
 
-@testset "unbundled juliac libraries are detected by their libjulia NEEDED" begin
-    # A plain C library links no libjulia: it must take the ordinary dlopen
-    # path (the whole suite above ran through it).
-    @test CNLPLib._stdlinked_libjulia(LIBPATH) === nothing
-    # Unreadable / not-an-object paths are left for dlopen to complain about.
-    @test CNLPLib._stdlinked_libjulia("/nonexistent/libfoo.so") === nothing
-    @test CNLPLib._stdlinked_libjulia(joinpath(FIXDIR, "tinyqp.c")) === nothing
-
-    # A library that links the standard libjulia soname is detected, with its version:
-    # the fixture linked against this process's own libjulia.
+@testset "an unbundled juliac library is refused" begin
+    # a plain C library links no libjulia, and loads (the whole suite above ran through it)
+    @test !CNLPLib._unbundled(LIBPATH)
+    @test !CNLPLib._unbundled("/nonexistent/libfoo.so")
+    # one that links the standard libjulia (here this process's own) would share the
+    # session's runtime: refused, with what to do instead
     if Sys.islinux()
         using Libdl
         libjulia = realpath(Libdl.dlpath("libjulia"))
-        ver = "$(VERSION.major).$(VERSION.minor)"
         linked = joinpath(mktempdir(), "libtinyqp_jl.so")
         run(`$cc -shared -fPIC -O2 -I$ROOT -o $linked $(joinpath(FIXDIR, "tinyqp.c"))
              -Wl,--no-as-needed $libjulia`)
-        @test CNLPLib._stdlinked_libjulia(linked) == ver
+        @test CNLPLib._unbundled(linked)
+        @test_throws "build it as a bundle" CNLPLib.load(linked)
     end
 end
 
