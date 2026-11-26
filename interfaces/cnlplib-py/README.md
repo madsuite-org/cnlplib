@@ -52,6 +52,11 @@ library carries and what each model takes. `m.get_vars()`, `m.get_cons()` and
 `multipliers`, `multipliers_L`, `multipliers_U`, and `m.get_value` / `m.set_value` on
 parameters.
 
+`m.report_instance()` and `m.report_solution(x, y, zl, zu)` are the library's reports (text
+about the instance and about a solution; `""` when it has none). With the library's CUDA
+build, `CModel(..., backend="cuda")` evaluates on the GPU: `obj`, `grad`, `cons`, `jac` and
+`hess` take and return CuPy arrays.
+
 The test suite compiles [`conformance/tinyqp.c`](../../conformance/tinyqp.c), a plain-C
 implementation of the ABI, against the repository's `cnlp.h`. Sibling package:
 [CNLPLib.jl](../CNLPLib.jl), the same consumer for Julia.
