@@ -182,6 +182,25 @@ solve time, the time of the instance with its loading, and the error message. Th
 of the output counts the instances solved, not solved and in error; the exit code is 0 when
 every instance was solved or acceptable.
 
+## Your own HSL
+
+The HSL linear solvers (MA27, MA57, MA77, MA86, MA97) are free for academic use but may not
+be passed on, so no solver carries them and `cnlp` never downloads them. With an HSL_jll you
+obtained from [STFC](https://licences.stfc.ac.uk/products/Software/HSL/LibHSL), a solver uses
+them through `cnlp hsl add`:
+
+```sh
+cnlp hsl add ~/Downloads/HSL_jll.jl.v2025.7.21.tar.gz     # or its directory, or a dir with libhsl
+cnlp solve @lv:wood 1000 --solver madnlp linear_solver=Ma57Solver
+cnlp hsl                                                  # where it is
+cnlp hsl remove
+```
+
+It copies the libraries for this platform beside the solver (`solvers/madnlp/lib/hsl`), and
+points the libraries they need (libgfortran, libgomp, libmetis, libblastrampoline) at the
+solver's own copies. A solver also takes an HSL from `JULIA_HSL_LIBRARY_PATH`,
+`artifacts.hsl` in the settings below, or its option `hsl_library=DIR`.
+
 ## Settings
 
 Local settings live in `$CNLPLIB_HOME/config.toml`, a TOML file of sections with string

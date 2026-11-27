@@ -13,6 +13,10 @@
 #   cnlp solve ...          solve a model with an installed solver (see: cnlp solve --help)
 #   cnlp remove NAME...     remove installed libraries, solvers or data sets
 #   cnlp path               print the library directory (for CNLPLIB_PATH)
+#   cnlp hsl add PATH [--solver NAME]   use your own HSL with a solver (default madnlp): PATH
+#                           is your HSL_jll (directory or tarball, from STFC) or a directory
+#                           with libhsl; cnlp never downloads or passes on HSL
+#   cnlp hsl remove [--solver NAME]
 #   cnlp config list|get KEY|set KEY VALUE|unset KEY
 #                           local settings in $CNLPLIB_HOME/config.toml: KEY is
 #                             SECTION.NAME, e.g. artifacts.hsl (where an artifact is,
@@ -376,6 +380,63 @@ cmd_config() {
     esac
 }
 
+# ── hsl: the user's own HSL, beside a solver that can use it ────────────────────────────
+# HSL's license does not allow passing it on, so no solver carries it. `cnlp hsl add` copies
+# the user's libhsl* into $SOLVERDIR/NAME/lib/hsl, where the solver looks for it, and gives the
+# libraries they need (libgfortran, libgomp, libmetis, libblastrampoline) the solver's own
+# private names, so they resolve to the solver's copies.
+hsl_triplet() {
+    case "$PLAT" in
+        linux-x86_64) echo x86_64-linux-gnu-libgfortran5 ;;
+        linux-aarch64) echo aarch64-linux-gnu-libgfortran5 ;;
+        macos-aarch64) echo aarch64-apple-darwin-libgfortran5 ;;
+        *) echo "" ;;
+    esac
+}
+cmd_hsl() {
+    sub="${1:-}"; [ $# -gt 0 ] && shift
+    solver=madnlp src=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --solver) [ $# -ge 2 ] || die "--solver needs a name"; solver="$2"; shift 2 ;;
+            --solver=*) solver="${1#--solver=}"; shift ;;
+            *) src="$1"; shift ;;
+        esac
+    done
+    dest="$SOLVERDIR/$solver/lib/hsl"
+    case "$sub" in
+        add)
+            [ -n "$src" ] || die "usage: cnlp hsl add PATH [--solver NAME]"
+            [ -d "$SOLVERDIR/$solver/lib" ] || die "no solver '$solver' installed (cnlp install $solver)"
+            tmp=""
+            case "$src" in
+                *.tar.gz|*.tgz) tmp="$(mktemp -d)"; tar -xzf "$src" -C "$tmp" || die "cannot unpack $src"; src="$tmp" ;;
+            esac
+            [ -e "$src" ] || die "no such file or directory: $src"
+            ext=so; [ "${PLAT%%-*}" = macos ] && ext=dylib
+            # HSL_jll's layout (override/lib/<platform>/) first, else any libhsl under PATH
+            lib=""; t="$(hsl_triplet)"
+            [ -n "$t" ] && [ -f "$src/override/lib/$t/libhsl.$ext" ] && lib="$src/override/lib/$t/libhsl.$ext"
+            [ -n "$lib" ] || [ ! -f "$src/libhsl.$ext" ] || lib="$src/libhsl.$ext"
+            [ -n "$lib" ] || lib="$(find "$src" -name "libhsl.$ext" -path "*$t*" 2>/dev/null | head -n 1)"
+            [ -n "$lib" ] || lib="$(find "$src" -name "libhsl.$ext" 2>/dev/null | head -n 1)"
+            [ -n "$lib" ] || { [ -z "$tmp" ] || rm -rf "$tmp"; die "no libhsl.$ext for $PLAT under $src"; }
+            rm -rf "$dest"; mkdir -p "$dest"
+            for f in "$(dirname "$lib")"/libhsl*; do [ -f "$f" ] && cp -p "$f" "$dest/"; done
+            [ -z "$tmp" ] || rm -rf "$tmp"
+            privatize
+            echo "Added HSL for $solver: $dest (from $(dirname "$lib"))" ;;
+        remove)
+            [ -d "$dest" ] || die "no HSL added for $solver"
+            rm -rf "$dest"; echo "Removed HSL for $solver" ;;
+        ""|show)
+            found=0
+            for d in "$SOLVERDIR"/*/lib/hsl; do [ -d "$d" ] && { echo "$(basename "$(dirname "$(dirname "$d")")"): $d"; found=1; }; done
+            [ "$found" = 1 ] || echo "no HSL added (cnlp hsl add PATH)" ;;
+        *) die "unknown hsl command '$sub' (add, remove)" ;;
+    esac
+}
+
 PLAT="$(platform)"
 case "${1:-}" in
     list) cmd_list ;;
@@ -384,6 +445,7 @@ case "${1:-}" in
     remove|uninstall) shift; cmd_remove "$@" ;;
     path) echo "$LIBDIR" ;;
     config) shift; cmd_config "$@" ;;
+    hsl) shift; cmd_hsl "$@" ;;
     solve) shift
         d="$CNLPLIB_HOME/bin/cnlp-solve"
         [ -x "$d" ] || d="$(command -v cnlp-solve 2>/dev/null)" || die "cnlp-solve is not installed (rerun the installer)"
