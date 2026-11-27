@@ -105,6 +105,18 @@ A model with reports prints them around the solve: what the instance is, before 
 summary of the solution after it (for an optimal power flow, its constraint violations by
 group, say), as the model's library defines them.
 
+After the solve, `cnlp solve` reports where the time went:
+
+```
+times: load model library 0.024 s, instantiate 0.002 s, load solver 2.233 s, solve 0.385 s, write 0.000 s, total 2.644 s
+```
+
+*load model library* is loading the model's shared library; a runtime it carries starts on
+its first call, so it shows in *instantiate*, which also includes reading the instance's data
+and a start. *load solver* includes what the solver does when it loads, such as starting its
+runtime and warming up a GPU. *solve* is the call to the solver alone, and *total* runs from
+the start of `cnlp solve` to the end of writing the outputs.
+
 **`-s START`** warm-starts from `reader:path` (one of the model's start readers, such as a
 solved case) or from a cnlp-solution HDF5 file written by an earlier solve; the start's
 sizes must match the model.
@@ -123,6 +135,10 @@ multipliers follow the cnlp sign convention.
 **`--solver NAME`** picks an installed solver (default `ipopt`), or a solver library by path
 (`--solver ./libcnlp_mysolver.so`).
 
+**`--device D`** is where the model and the solver run: `auto` (the default) takes the GPU
+when the model's library has a CUDA tier and the solver runs there, `cpu` never does, `cuda`
+requires it, and `cuda:N` is `cuda` on GPU N.
+
 **`key=value`** options go to the solver as written: `tol=1e-8 max_iter=500 print_level=0`
 for Ipopt. A solver refuses an option it does not know, by name.
 
@@ -140,6 +156,31 @@ free for academic use), or the library of Julia's HSL_jll package.
 `cnlp solve` prints the model's size, the status, the objective, the iteration count and the
 time, and exits with 0 when the status is `solved` or `acceptable`, 1 otherwise, and 2 for an
 error before the solve.
+
+### Many instances in one process
+
+`--batch FILE` solves one instance per line of `FILE` (`-` reads standard input), one after
+the other in one process, so the solver and each model library are loaded once. A line is
+what follows `cnlp solve` for one instance; `#` starts a comment.
+
+```
+# runs.txt
+@lv:wood 10000
+@cops:glider 400
+@emp:acp pglib_opf_case118_ieee -o case118.m
+```
+
+```sh
+cnlp solve --batch runs.txt --results results.tsv --solver madnlp --device cuda:1 tol=1e-8
+```
+
+`--solver`, `--device` and `key=value` given on the command line apply to every line, after
+the line's own. An error in one line (a missing model or file, a callback that fails) ends
+that instance and the batch goes on. `--results` writes a tab-separated row per instance as
+it finishes: the line, the status (or `error`), the objective, the iteration count, the
+solve time, the time of the instance with its loading, and the error message. The last line
+of the output counts the instances solved, not solved and in error; the exit code is 0 when
+every instance was solved or acceptable.
 
 ## Settings
 

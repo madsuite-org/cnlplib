@@ -1,6 +1,7 @@
 # CNLPLib.jl
 
 [![julia](https://github.com/madsuite-org/cnlplib/actions/workflows/julia.yml/badge.svg)](https://github.com/madsuite-org/cnlplib/actions/workflows/julia.yml)
+[![docs](https://img.shields.io/badge/docs-cnlplib.madsuite.org%2Fjulia-blue)](https://cnlplib.madsuite.org/julia/)
 
 [cnlp libraries](https://cnlplib.madsuite.org) (compiled nonlinear programs) as NLPModels,
 for any NLPModels solver, and the Julia side of the cnlp solver interface.
