@@ -196,7 +196,7 @@ cnlp hsl                                                  # where it is
 cnlp hsl remove
 ```
 
-It copies the libraries for this platform beside the solver (`solvers/madnlp/lib/hsl`), and
+It copies the libraries for this platform beside the solver's runtime (`solvers/madnlp/lib/julia`), and
 points the libraries they need (libgfortran, libgomp, libmetis, libblastrampoline) at the
 solver's own copies. A solver also takes an HSL from `JULIA_HSL_LIBRARY_PATH`,
 `artifacts.hsl` in the settings below, or its option `hsl_library=DIR`.

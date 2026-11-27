@@ -9,14 +9,17 @@
  * library of the store, each name that belongs to a library the store carries (DT_SONAME,
  * DT_NEEDED, the file names of its version needs) changes from `lib...` to a three-character
  * prefix of the directory that provides it (`c4k...`), the same length, so the string table is
- * edited in place (Julia's own LLVM and libjulia keep their names). A link under the new name is
+ * edited in place (Julia's own LLVM and libjulia keep their names). So is the same name where
+ * a runtime keeps it as a string to open by name (a NUL-terminated name standing alone), so a
+ * runtime opens its own copy, not another runtime's of the same name. A link under the new name is
  * added beside every entry with the old one, and
  * the files keep their names, so whatever opens them by path still finds them. Running it
  * again changes nothing. ELF64 little-endian (Linux x86_64, aarch64); other files are left
  * alone.
  *
  * Scopes: each directory of $CNLPLIB_HOME/artifacts (a shared runtime), and each installed
- * library's or solver's lib/ (its own files, and the links its lib/julia makes into a runtime).
+ * library's or solver's directory (its lib/, the links its lib/julia makes into a runtime, and
+ * the artifacts it carries in share/).
  * A name is renamed after the directory its file actually lives in, so a library and the
  * runtime it links agree. Two directories never share a prefix: the prefix chosen for each is
  * kept in $CNLPLIB_HOME/.privatize (prefix, then directory under the store, per line), and a
@@ -99,6 +102,10 @@ static int pv_scan(const char* p, const struct stat* st, int type, struct FTW* f
     /* Julia's own LLVM and libjulia keep their names: no host carries them (`libLLVM.so.18.1jl`
      * is Julia's build), and code loaded from outside the store may ask for them by name */
     int julia_own = !strncmp(base, "libLLVM", 7) || !strncmp(base, "libjulia", 8);
+    /* nor does the GPU driver: libcuda (a bundle's copy is CUDA's forward-compatibility driver,
+     * usable only on some machines) and libnvidia-* belong to the system's driver, which a
+     * runtime must open by its standard name */
+    julia_own |= !strncmp(base, "libcuda.", 8) || !strncmp(base, "libnvidia-", 10);
     if ((type == FTW_F || type == FTW_SL) && !strncmp(base, "lib", 3) && strstr(base, ".so") && !julia_own) {
         char real[PATH_MAX];
         if (realpath(p, real) && !pv_lookup(base)) {
@@ -163,19 +170,40 @@ static int pv_edit(const char* p) {
     void* m = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0); close(fd);
     if (m == MAP_FAILED) return 0;
     const unsigned char* b = m;
-    uint64_t offs[256]; int n = pv_strings(b, size, offs, 256), edits = 0;
-    uint64_t at[256]; const char* to[256];
+    uint64_t offs[256]; int n = pv_strings(b, size, offs, 256), edits = 0, cap = 256;
+    uint64_t* at = malloc(cap * sizeof *at); const char** to = malloc(cap * sizeof *to);
+    if (!at || !to) die("out of memory");
     for (int k = 0; k < n; k++) {
         const char* s = (const char*)b + offs[k];
         const char* pre = strnlen(s, size - offs[k]) < size - offs[k] ? pv_lookup(s) : NULL;
         if (pre) { at[edits] = offs[k]; to[edits++] = pre; }
     }
-    if (!edits) { munmap(m, size); return 0; }
+    /* A library a runtime opens by name (`dlopen("libblastrampoline.so.5")`, a JLL's product
+     * name) is a string in its data, not a DT_NEEDED entry: such a name, NUL-terminated and
+     * standing alone (a NUL before it, not a path), is renamed too, so the runtime opens its
+     * own private copy rather than one another runtime already loaded under that name. */
+    for (const unsigned char* q = b + 1; (q = memmem(q, size - (q - b), "lib", 3)) != NULL; q += 3) {
+        if (q[-1] != 0) continue;
+        size_t left = size - (q - b), L = strnlen((const char*)q, left < 256 ? left : 256);
+        if (L >= (left < 256 ? left : 256)) continue;
+        const char* pre = pv_lookup((const char*)q);
+        if (!pre) continue;
+        uint64_t o = (uint64_t)(q - b); int seen = 0;
+        for (int k = 0; k < edits && !seen; k++) seen = at[k] == o;
+        if (seen) continue;
+        if (edits == cap) {
+            cap *= 2; at = realloc(at, cap * sizeof *at); to = realloc(to, cap * sizeof *to);
+            if (!at || !to) die("out of memory");
+        }
+        at[edits] = o; to[edits++] = pre;
+    }
+    if (!edits) { free(at); free(to); munmap(m, size); return 0; }
     /* written to a new file and renamed over the old: a process that has it open keeps its copy */
     unsigned char* c = malloc(size);
     if (!c) { munmap(m, size); die("out of memory"); }
     memcpy(c, b, size); munmap(m, size);
     for (int k = 0; k < edits; k++) memcpy(c + at[k], to[k], 3);
+    free(at); free(to);
     char tmp[PATH_MAX]; snprintf(tmp, sizeof tmp, "%s.cnlp-priv", p);
     FILE* f = fopen(tmp, "wb");
     if (!f) { free(c); die("cannot write %s", tmp); }
@@ -237,7 +265,9 @@ static int privatize(int nargs, char** args) {
     if (nargs) die("--privatize takes no arguments: it works on the whole store ($CNLPLIB_HOME)");
     pv_table_load();
     pv_list dirs = { 0 };
-    pv_subdirs(&dirs, "artifacts", ""); pv_subdirs(&dirs, "lib", "/lib"); pv_subdirs(&dirs, "solvers", "/lib");
+    /* a library's or solver's whole directory: its lib/, and the artifacts its runtime loads
+     * (share/julia/artifacts), in one scope, so their names agree */
+    pv_subdirs(&dirs, "artifacts", ""); pv_subdirs(&dirs, "lib", ""); pv_subdirs(&dirs, "solvers", "");
     int changed = 0;
     for (int k = 0; k < dirs.n; k++) changed += pv_scope(dirs.v[k]);
     pv_links();

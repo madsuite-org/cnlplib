@@ -382,9 +382,10 @@ cmd_config() {
 
 # ── hsl: the user's own HSL, beside a solver that can use it ────────────────────────────
 # HSL's license does not allow passing it on, so no solver carries it. `cnlp hsl add` copies
-# the user's libhsl* into $SOLVERDIR/NAME/lib/hsl, where the solver looks for it, and gives the
-# libraries they need (libgfortran, libgomp, libmetis, libblastrampoline) the solver's own
-# private names, so they resolve to the solver's copies.
+# the user's libhsl* into $SOLVERDIR/NAME/lib/julia, beside the solver's runtime libraries,
+# where the solver looks for it, and gives the libraries they need (libgfortran, libgomp,
+# libmetis, libblastrampoline) the solver's own private names; the loader finds those beside
+# libhsl ($ORIGIN), so they resolve to the solver's copies.
 hsl_triplet() {
     case "$PLAT" in
         linux-x86_64) echo x86_64-linux-gnu-libgfortran5 ;;
@@ -392,6 +393,13 @@ hsl_triplet() {
         macos-aarch64) echo aarch64-apple-darwin-libgfortran5 ;;
         *) echo "" ;;
     esac
+}
+# the HSL files in DIR, and the private-name links to them
+hsl_clear() {
+    for f in "$1"/libhsl* "$1"/c??hsl*; do
+        [ -e "$f" ] || [ -L "$f" ] || continue
+        case "$f" in */libhsl*) rm -f "$f" ;; *) [ -L "$f" ] && rm -f "$f" ;; esac
+    done
 }
 cmd_hsl() {
     sub="${1:-}"; [ $# -gt 0 ] && shift
@@ -403,7 +411,7 @@ cmd_hsl() {
             *) src="$1"; shift ;;
         esac
     done
-    dest="$SOLVERDIR/$solver/lib/hsl"
+    dest="$SOLVERDIR/$solver/lib/julia"
     case "$sub" in
         add)
             [ -n "$src" ] || die "usage: cnlp hsl add PATH [--solver NAME]"
@@ -421,17 +429,20 @@ cmd_hsl() {
             [ -n "$lib" ] || lib="$(find "$src" -name "libhsl.$ext" -path "*$t*" 2>/dev/null | head -n 1)"
             [ -n "$lib" ] || lib="$(find "$src" -name "libhsl.$ext" 2>/dev/null | head -n 1)"
             [ -n "$lib" ] || { [ -z "$tmp" ] || rm -rf "$tmp"; die "no libhsl.$ext for $PLAT under $src"; }
-            rm -rf "$dest"; mkdir -p "$dest"
+            [ -d "$dest" ] || die "the solver '$solver' has no lib/julia: it cannot take HSL"
+            hsl_clear "$dest"
             for f in "$(dirname "$lib")"/libhsl*; do [ -f "$f" ] && cp -p "$f" "$dest/"; done
             [ -z "$tmp" ] || rm -rf "$tmp"
             privatize
             echo "Added HSL for $solver: $dest (from $(dirname "$lib"))" ;;
         remove)
-            [ -d "$dest" ] || die "no HSL added for $solver"
-            rm -rf "$dest"; echo "Removed HSL for $solver" ;;
+            [ -f "$dest/libhsl.so" ] || [ -f "$dest/libhsl.dylib" ] || die "no HSL added for $solver"
+            hsl_clear "$dest"; echo "Removed HSL for $solver" ;;
         ""|show)
             found=0
-            for d in "$SOLVERDIR"/*/lib/hsl; do [ -d "$d" ] && { echo "$(basename "$(dirname "$(dirname "$d")")"): $d"; found=1; }; done
+            for d in "$SOLVERDIR"/*/lib/julia; do
+                { [ -f "$d/libhsl.so" ] || [ -f "$d/libhsl.dylib" ]; } && { echo "$(basename "$(dirname "$(dirname "$d")")"): $d"; found=1; }
+            done
             [ "$found" = 1 ] || echo "no HSL added (cnlp hsl add PATH)" ;;
         *) die "unknown hsl command '$sub' (add, remove)" ;;
     esac
