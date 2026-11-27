@@ -26,7 +26,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: build/hdf5
-          key: hdf5-1.14.6-manylinux_2_28
+          key: hdf5-1.14.6-pic-manylinux_2_28
       - name: Build
         run: sh scripts/build-cnlp.sh linux-x86_64 dist
       - name: Check the solver

@@ -13,6 +13,10 @@
 #   cnlp solve ...          solve a model with an installed solver (see: cnlp solve --help)
 #   cnlp remove NAME...     remove installed libraries, solvers or data sets
 #   cnlp path               print the library directory (for CNLPLIB_PATH)
+#   cnlp config list|get KEY|set KEY VALUE|unset KEY
+#                           local settings in $CNLPLIB_HOME/config.toml: KEY is
+#                             SECTION.NAME, e.g. artifacts.hsl (where an artifact is,
+#                             instead of the store's copy)
 #
 # A library is published per backend: the host (CPU) build, and a build with a device tier
 # (CUDA) as well. `install` takes the device build when this machine has that device
@@ -260,6 +264,15 @@ install_one() {
     rm -rf "$dest/.old-$n" "$stage"
     trap - EXIT INT TERM
     echo "Installed $n $ver in $dest/$n"
+    privatize
+}
+
+# Private names for the store's bundled libraries (OpenSSL, curl, libstdc++, ...), so that a
+# process that has already loaded its own copies (Python's hashlib loads the system OpenSSL)
+# cannot be handed them in place of the bundle's: cnlp-solve --privatize, see solve/privatize.h.
+privatize() {
+    _ps="$CNLPLIB_HOME/bin/cnlp-solve"; [ -x "$_ps" ] || _ps="$(command -v cnlp-solve 2>/dev/null)" || return 0
+    "$_ps" --privatize || echo "cnlp: could not give the bundled libraries private names" >&2
 }
 
 cmd_install() {
@@ -303,6 +316,66 @@ cmd_remove() {
     done
 }
 
+# ── config: $CNLPLIB_HOME/config.toml, sections of `name = "value"` lines ─────────────────
+# KEY is SECTION.NAME, split at the first dot (artifacts.cuda-12.9 is section artifacts,
+# name cuda-12.9). A name that is not a bare TOML key (letters, digits, - and _) is written
+# quoted; values are strings.
+CONFIG="$CNLPLIB_HOME/config.toml"
+config_split() {
+    case "$1" in *.*) ;; *) die "a config key is SECTION.NAME (e.g. artifacts.hsl), not '$1'" ;; esac
+    sec="${1%%.*}"; name="${1#*.}"
+    [ -n "$sec" ] && [ -n "$name" ] || die "a config key is SECTION.NAME (e.g. artifacts.hsl), not '$1'"
+}
+# every setting as SECTION.NAME<TAB>VALUE
+config_dump() {
+    [ -f "$CONFIG" ] || return 0
+    awk '
+        /^[ \t]*(#|$)/ { next }
+        /^[ \t]*\[/ { s = $0; sub(/^[ \t]*\[[ \t]*/, "", s); sub(/[ \t]*\].*$/, "", s); next }
+        {
+            line = $0; eq = index(line, "="); if (!eq) next
+            k = substr(line, 1, eq - 1); v = substr(line, eq + 1)
+            gsub(/^[ \t]+|[ \t]+$/, "", k); gsub(/^[ \t]+|[ \t]+$/, "", v)
+            if (k ~ /^".*"$/) k = substr(k, 2, length(k) - 2)
+            if (v ~ /^".*"$/) { v = substr(v, 2, length(v) - 2); gsub(/\\"/, "\"", v); gsub(/\\\\/, "\\", v) }
+            print s "." k "\t" v
+        }' "$CONFIG"
+}
+# the file again from SECTION.NAME<TAB>VALUE lines (sorted), with a header
+config_write() {
+    mkdir -p "$CNLPLIB_HOME"
+    tmp="$CONFIG.tmp.$$"
+    {
+        echo "# cnlp settings (cnlp config set/unset); see https://cnlplib.madsuite.org/cli/"
+        sort | awk -F '\t' '
+            {
+                d = index($1, "."); sec = substr($1, 1, d - 1); k = substr($1, d + 1); v = $2
+                if (sec != last) { if (NR > 1) print ""; print "[" sec "]"; last = sec }
+                if (k !~ /^[A-Za-z0-9_-]+$/) k = "\"" k "\""
+                gsub(/\\/, "\\\\", v); gsub(/"/, "\\\"", v)
+                print k " = \"" v "\""
+            }'
+    } > "$tmp"
+    mv "$tmp" "$CONFIG"
+}
+cmd_config() {
+    sub="${1:-list}"; [ $# -gt 0 ] && shift
+    case "$sub" in
+        list) config_dump | awk -F '\t' '{ print $1 " = " $2 }' ;;
+        get) [ $# -eq 1 ] || die "usage: cnlp config get SECTION.NAME"
+            config_split "$1"
+            v="$(config_dump | awk -F '\t' -v k="$1" '$1 == k { print $2; f = 1 } END { exit !f }')" || exit 1
+            printf '%s\n' "$v" ;;
+        set) [ $# -eq 2 ] || die "usage: cnlp config set SECTION.NAME VALUE"
+            config_split "$1"
+            { config_dump | awk -F '\t' -v k="$1" '$1 != k'; printf '%s\t%s\n' "$1" "$2"; } | config_write ;;
+        unset) [ $# -eq 1 ] || die "usage: cnlp config unset SECTION.NAME"
+            config_split "$1"
+            config_dump | awk -F '\t' -v k="$1" '$1 != k' | config_write ;;
+        *) die "unknown config command '$sub' (list, get, set, unset)" ;;
+    esac
+}
+
 PLAT="$(platform)"
 case "${1:-}" in
     list) cmd_list ;;
@@ -310,6 +383,7 @@ case "${1:-}" in
     up|update) cmd_up ;;
     remove|uninstall) shift; cmd_remove "$@" ;;
     path) echo "$LIBDIR" ;;
+    config) shift; cmd_config "$@" ;;
     solve) shift
         d="$CNLPLIB_HOME/bin/cnlp-solve"
         [ -x "$d" ] || d="$(command -v cnlp-solve 2>/dev/null)" || die "cnlp-solve is not installed (rerun the installer)"

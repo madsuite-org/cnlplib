@@ -10,7 +10,7 @@
  * cnlp-solution file; OUTPUT is `writer:path`, or a path written with the model's default
  * writer, else as a cnlp-solution HDF5 file. key=value options go to the solver.
  *
- *   cc -std=c99 -O2 -I.. -o cnlp-solve cnlp-solve.c -ldl -lhdf5
+ *   cc -std=c99 -O2 -I.. -o cnlp-solve cnlp-solve.c -ldl -lhdf5   (includes cnlpio.c)
  */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -245,61 +245,10 @@ static int64_t m_hess_d(void* c, const double* x, const double* y, double w, dou
     instance* m = c; return ((hv)m->hess_d)(m->id, x, y, w, v);
 }
 
-/* ── cnlp-solution HDF5 (formats/solution.md) ─────────────────────────────────── */
+/* ── cnlp-solution HDF5 (formats/solution.md): libcnlpio, compiled in ───────────── */
 
-static void attr_str(hid_t o, const char* k, const char* v) {
-    hid_t t = H5Tcopy(H5T_C_S1); H5Tset_size(t, strlen(v) ? strlen(v) : 1);
-    hid_t s = H5Screate(H5S_SCALAR), a = H5Acreate2(o, k, t, s, H5P_DEFAULT, H5P_DEFAULT);
-    H5Awrite(a, t, v); H5Aclose(a); H5Sclose(s); H5Tclose(t);
-}
-static void attr_i64(hid_t o, const char* k, int64_t v) {
-    hid_t s = H5Screate(H5S_SCALAR), a = H5Acreate2(o, k, H5T_STD_I64LE, s, H5P_DEFAULT, H5P_DEFAULT);
-    H5Awrite(a, H5T_NATIVE_INT64, &v); H5Aclose(a); H5Sclose(s);
-}
-static void ds(hid_t g, const char* k, hid_t ft, hid_t mt, int64_t n, const void* v) {
-    hsize_t d = (hsize_t)n;
-    hid_t s = n < 0 ? H5Screate(H5S_SCALAR) : H5Screate_simple(1, &d, NULL);
-    hid_t x = H5Dcreate2(g, k, ft, s, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-    H5Dwrite(x, mt, H5S_ALL, H5S_ALL, H5P_DEFAULT, v); H5Dclose(x); H5Sclose(s);
-}
-static void ds_str(hid_t g, const char* k, const char* v) {
-    hid_t t = H5Tcopy(H5T_C_S1); H5Tset_size(t, strlen(v) ? strlen(v) : 1);
-    ds(g, k, t, t, -1, v); H5Tclose(t);
-}
+#include "cnlpio.c"
 static const char* STATUS[] = { "solved", "acceptable", "infeasible", "unbounded", "iteration_limit", "time_limit", "error" };
-static void write_h5(const char* path, const char* lib, int64_t n, int64_t m, int minimize, const cnlp_result* r,
-                     const char* solver) {
-    hid_t f = H5Fcreate(path, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
-    if (f < 0) die("cannot write %s", path);
-    attr_str(f, "format", "cnlp-solution"); attr_str(f, "format_version", "0.2");
-    attr_str(f, "library", lib); attr_str(f, "model", PRE);
-    attr_i64(f, "nvar", n); attr_i64(f, "ncon", m);
-    hid_t g = H5Gcreate2(f, "solution", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-    ds(g, "solution", H5T_IEEE_F64LE, H5T_NATIVE_DOUBLE, n, r->x);
-    ds(g, "multipliers", H5T_IEEE_F64LE, H5T_NATIVE_DOUBLE, m, r->y);
-    ds(g, "multipliers_L", H5T_IEEE_F64LE, H5T_NATIVE_DOUBLE, n, r->zl);
-    ds(g, "multipliers_U", H5T_IEEE_F64LE, H5T_NATIVE_DOUBLE, n, r->zu);
-    ds(g, "objective", H5T_IEEE_F64LE, H5T_NATIVE_DOUBLE, -1, &r->objective);
-    int8_t mn = (int8_t)minimize; ds(g, "minimize", H5T_STD_I8LE, H5T_NATIVE_INT8, -1, &mn);
-    ds_str(g, "status", STATUS[r->status >= 0 && r->status <= 6 ? r->status : 6]);
-    int64_t it = r->iterations; ds(g, "iterations", H5T_STD_I64LE, H5T_NATIVE_INT64, -1, &it);
-    ds_str(g, "solver", solver); ds_str(g, "solver_status", r->solver_status);
-    H5Gclose(g); H5Fclose(f);
-}
-static int read_h5(const char* path, int64_t n, int64_t m, double* x, double* y, double* zl, double* zu) {
-    hid_t f = H5Fopen(path, H5F_ACC_RDONLY, H5P_DEFAULT);
-    if (f < 0) return 0;
-    const char* k[] = { "solution/solution", "solution/multipliers", "solution/multipliers_L", "solution/multipliers_U" };
-    double* v[] = { x, y, zl, zu }; int64_t L[] = { n, m, n, n };
-    for (int i = 0; i < 4; i++) {
-        hid_t d = H5Dopen2(f, k[i], H5P_DEFAULT);
-        if (d < 0) { H5Fclose(f); die("%s has no %s", path, k[i]); }
-        hid_t s = H5Dget_space(d); hssize_t c = H5Sget_simple_extent_npoints(s); H5Sclose(s);
-        if (c != L[i]) { H5Dclose(d); H5Fclose(f); die("%s: %s has %lld entries, the model needs %lld", path, k[i], (long long)c, (long long)L[i]); }
-        H5Dread(d, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, v[i]); H5Dclose(d);
-    }
-    H5Fclose(f); return 1;
-}
 
 /* ── the solver ───────────────────────────────────────────────────────────────── */
 
@@ -358,7 +307,10 @@ static void usage(void) {
          "  --device auto (default: the GPU when the model and the solver both run there), cpu or cuda");
 }
 
+#include "privatize.h"
+
 int main(int argc, char** argv) {
+    if (argc >= 2 && !strcmp(argv[1], "--privatize")) return privatize(argc - 2, argv + 2);
     if (argc < 2 || !strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) { usage(); return argc < 2; }
     const char *libspec = NULL, *start = NULL, *solver = "ipopt", *device = "auto";
     char *pos[64], *outs[16], *keys[128], *vals[128]; int npos = 0, nout = 0, nopt = 0;
@@ -417,7 +369,10 @@ int main(int argc, char** argv) {
             char f[256]; snprintf(f, sizeof f, "start_from_%s", rd);
             int64_t (*sf)(int64_t, const char*, double*, double*, double*, double*) = need(f);
             if (sf(id, resolve_file(rest), x0, y0, zl0, zu0)) die("reader `%s` could not read %s", rd, rest);
-        } else if (!read_h5(start, n, m, x0, y0, zl0, zu0)) die("cannot read the start %s", start);
+        } else {
+            char e[512];
+            if (cnlpio_read_start(start, n, m, x0, y0, zl0, zu0, e, sizeof e)) die("cannot read the start: %s", e);
+        }
     }
     cnlp_problem P = { &M, n, m, nj, nh, minimize, x0, lv, uv, lc, uc, y0, zl0, zu0,
                        m_obj, m_grad, m_cons, m_js, m_jac, m_hs, m_hess };
@@ -476,7 +431,13 @@ int main(int argc, char** argv) {
             char f[256]; snprintf(f, sizeof f, "write_%s", wr);
             int64_t (*w)(int64_t, const char*, const double*, const double*, const double*, const double*, double, const char*) = need(f);
             if (w(id, path, R.x, R.y, R.zl, R.zu, R.objective, STATUS[R.status])) die("writer `%s` could not write %s", wr, path);
-        } else write_h5(path, lib, n, m, minimize, &R, sname);
+        } else {
+            char e[512];
+            if (cnlpio_write_solution(path, LIB, lib, PRE, id, n, m, minimize, R.x, R.y, R.zl, R.zu, R.objective,
+                                      STATUS[R.status >= 0 && R.status <= 6 ? R.status : 6], R.iterations, sname,
+                                      R.solver_status, e, sizeof e))
+                die("%s", e);
+        }
         printf("wrote %s%s%s\n", path, wr[0] ? " with " : "", wr);
     }
     return R.status <= CNLP_ACCEPTABLE ? 0 : 1;

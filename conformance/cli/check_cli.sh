@@ -23,7 +23,12 @@ R=$W/releases; mkdir -p "$R/cnlplib" "$R/cnlptest" "$R/data"
 cp "$DIST/cnlp-solve-$PLAT.tar.gz" "$DIST/ipopt-$PLAT.tar.gz" "$R/cnlplib/"
 (cd "$R/cnlplib" && sha256sum -- *.tar.gz > SHA256SUMS)
 mkdir -p "$W/b/cnlptest/lib"
-cc -std=c99 -O2 -shared -fPIC -o "$W/b/cnlptest/lib/libcnlptest.so" "$ROOT/conformance/cli/testlib.c" -lm
+# the library carries a library of its own, as a bundle carries its runtime's: `cnlp install`
+# gives it a private name, and the library still loads
+printf 'double cnlpdep_one(void) { return 1.0; }\n' > "$W/dep.c"
+cc -shared -fPIC -Wl,-soname,libcnlpdep.so.1 -o "$W/b/cnlptest/lib/libcnlpdep.so.1" "$W/dep.c"
+cc -std=c99 -O2 -shared -fPIC -o "$W/b/cnlptest/lib/libcnlptest.so" "$ROOT/conformance/cli/testlib.c" -lm \
+    -L"$W/b/cnlptest/lib" -Wl,--no-as-needed -l:libcnlpdep.so.1 -Wl,-rpath,'$ORIGIN'
 printf 'name = cnlptest\nversion = 0.0.1\ncnlp_abi = 0.2\n' > "$W/b/cnlptest/VERSION"
 tar -C "$W/b" -czf "$R/cnlptest/cnlptest-$PLAT.tar.gz" cnlptest
 (cd "$R/cnlptest" && sha256sum -- *.tar.gz > SHA256SUMS)
@@ -52,6 +57,15 @@ cnlp install cnlptest ipopt > "$W/i.log" 2>&1 && ok "cnlp install cnlptest ipopt
 cnlp list | grep -q 'cpu' && ok "cnlp list shows backends" || bad "cnlp list shows backends"
 [ "$(cnlp list | grep -c '^  cnlptest ')" = 1 ] && cnlp list | grep '^  cnlptest ' | grep -q 'latest' && ok "cnlp list has one row per library, with what is installed" || bad "cnlp list rows: $(cnlp list)"
 cnlp install cnlptest 2>&1 | grep -q 'up to date' && ok "a second install is a no-op" || bad "a second install is a no-op"
+L=$CNLPLIB_HOME/lib/cnlptest/lib
+P=$(grep -aoE 'c[0-9a-z]{2}cnlpdep\.so\.1' "$L/libcnlptest.so" | head -n 1)   # the name it asks for
+[ -n "$P" ] && [ -L "$L/$P" ] && grep -q "$P" "$L/libcnlptest.so" && ! grep -q 'libcnlpdep.so.1' "$L/libcnlptest.so" \
+    && grep -q "$P" "$L/libcnlpdep.so.1" && ok "the library's own libraries get private names ($P), with a link under each" \
+    || bad "private names: $(ls -l "$L")"
+cnlp-solve --privatize | grep -q . && bad "giving private names twice changes something" || ok "giving private names again changes nothing"
+T="$CNLPLIB_HOME/.privatize"   # one prefix per library directory, recorded, none shared
+[ -s "$T" ] && [ -z "$(cut -f1 "$T" | sort | uniq -d)" ] && grep -q "$(printf '%s' "$P" | cut -c1-3)	lib/cnlptest/lib" "$T" \
+    && ok "each library directory has its own prefix, recorded in the store" || bad "prefix table: $(cat "$T" 2>&1)"
 
 # ── cnlp solve ───────────────────────────────────────────────────────────────────
 h5() {   # FILE FIELD -> value
@@ -95,6 +109,30 @@ cnlp solve @cnlptest:pn 6 --device tpu $S > "$W/e.log" 2>&1 && bad "an unknown d
 cnlp solve @cnlptest:pn 6 $S > "$W/s.log" 2>&1 && grep -q '(cpu)' "$W/s.log" && ok "without a device tier the solve runs on the cpu, and says so" || bad "cpu solve: $(cat "$W/s.log")"
 cnlp solve @cnlptest:pb 5 > "$W/e.log" 2>&1 && bad "a wrong number of arguments is refused" || { grep -q 'takes 2' "$W/e.log" && ok "a wrong number of arguments is refused" || bad "argument count message: $(cat "$W/e.log")"; }
 cnlp solve @nolib:x 1 > "$W/e.log" 2>&1 && bad "a missing library is refused" || { grep -q 'cnlp install' "$W/e.log" && ok "a missing library is refused, with what to install" || bad "missing library message: $(cat "$W/e.log")"; }
+# Python: cnlplib.solve loads the installed solver in-process and hands it the library's functions
+PYTHONPATH="$ROOT/interfaces/cnlplib-py/src" "$PY" -c '
+import cnlplib, numpy as np
+m = cnlplib.CModel("@cnlptest", "pn", 6)
+for r in (cnlplib.solve(m), cnlplib.solve(m, tol=1e-10), cnlplib.solve(m, solver="ipopt")):
+    assert r.status == "solved" and abs(r.objective - 0.5) < 1e-6, r
+    assert np.allclose(r.solution, [0.5, 0.5, 1, 1, 1, 1], atol=1e-6) and r.solver == "ipopt" and r.device == "cpu", r
+assert cnlplib.load_solver("ipopt") is cnlplib.load_solver("ipopt")
+m.backend = "cuda"    # a model on the GPU (as backend="cuda" makes one) is not for a host solver
+try:
+    cnlplib.solve(m); raise SystemExit("a GPU model went to a host-only solver")
+except ValueError as e:
+    assert "does not run there" in str(e), e
+' > "$W/py.log" 2>&1 && ok "Python: cnlplib.solve with an installed solver, loaded once, in-process" || bad "cnlplib.solve: $(cat "$W/py.log")"
+
+# ── cnlp config ─────────────────────────────────────────────────────────────────
+cnlp config set artifacts.hsl /opt/hsl/lib && cnlp config set artifacts.cuda-12.9 '/a "b"' \
+    && [ "$(cnlp config get artifacts.hsl)" = /opt/hsl/lib ] && [ "$(cnlp config get artifacts.cuda-12.9)" = '/a "b"' ] \
+    && ok "cnlp config set/get" || bad "cnlp config set/get: $(cat "$CNLPLIB_HOME/config.toml" 2>&1)"
+"$PY" -c "import sys, tomllib; c = tomllib.load(open(sys.argv[1], 'rb')); assert c['artifacts'] == {'hsl': '/opt/hsl/lib', 'cuda-12.9': '/a \"b\"'}, c" \
+    "$CNLPLIB_HOME/config.toml" && ok "config.toml is TOML" || bad "config.toml: $(cat "$CNLPLIB_HOME/config.toml")"
+cnlp config unset artifacts.hsl && ! cnlp config get artifacts.hsl > /dev/null 2>&1 && cnlp config list | grep -q '^artifacts.cuda-12.9 = ' \
+    && ok "cnlp config unset/list" || bad "cnlp config unset/list: $(cnlp config list 2>&1)"
+cnlp config get hsl > /dev/null 2>&1 && bad "a key without a section was accepted" || ok "a config key is SECTION.NAME"
 
 # ── cnlp up / remove ────────────────────────────────────────────────────────────
 cnlp up > "$W/u.log" 2>&1 && ok "cnlp up" || bad "cnlp up: $(cat "$W/u.log")"

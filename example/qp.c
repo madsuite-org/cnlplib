@@ -11,7 +11,7 @@
  *
  * Build:    cc -shared -fPIC -O2 -o libqp.so qp.c -lm
  * Consume:  see solve.c next to this file — or any cnlp consumer:
- *           CNLPModels.jl:  CNLPModel("path/to/libqp.so", 4)
+ *           CNLPLib.jl:     CNLPModel("path/to/libqp.so", 4)
  *           cnlpmodels-py:  cnlpmodels.CModel("path/to/libqp.so", 4)
  *
  * Including cnlp.h and expanding the X-macros first is what buys prototype
