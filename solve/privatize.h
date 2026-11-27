@@ -40,7 +40,7 @@ static void pv_push(pv_list* l, const char* s) {
 
 /* the scope being processed: its ELF files, and its library names with the prefix of the
  * directory that provides each */
-static pv_list PV_FILES, PV_NAMES, PV_PREFIX, PV_ENTRIES;
+static pv_list PV_FILES, PV_NAMES, PV_PREFIX, PV_ENTRIES, PV_ENTRY_PREFIX;
 static int PV_LINKS;
 
 /* the prefixes given so far, and the directory (under the store) each belongs to */
@@ -95,7 +95,8 @@ static int pv_is_elf(const char* p) {
     close(fd); return ok;
 }
 /* every `lib*.so*` entry of the scope (file or link) with the prefix of the directory its file
- * is in; every ELF file */
+ * is in (a name the scope has twice, its own copy and a link to a shared artifact's, is
+ * renamed after the first, and every entry gets the links); every ELF file */
 static int pv_scan(const char* p, const struct stat* st, int type, struct FTW* f) {
     (void)st;
     const char* base = p + f->base;
@@ -108,9 +109,10 @@ static int pv_scan(const char* p, const struct stat* st, int type, struct FTW* f
     julia_own |= !strncmp(base, "libcuda.", 8) || !strncmp(base, "libnvidia-", 10);
     if ((type == FTW_F || type == FTW_SL) && !strncmp(base, "lib", 3) && strstr(base, ".so") && !julia_own) {
         char real[PATH_MAX];
-        if (realpath(p, real) && !pv_lookup(base)) {
+        if (realpath(p, real)) {
             char pre[4]; pv_prefix(dirname(real), pre);
-            pv_push(&PV_NAMES, base); pv_push(&PV_PREFIX, pre); pv_push(&PV_ENTRIES, p);
+            if (!pv_lookup(base)) { pv_push(&PV_NAMES, base); pv_push(&PV_PREFIX, pre); }
+            pv_push(&PV_ENTRIES, p); pv_push(&PV_ENTRY_PREFIX, pre);
         }
     }
     if (type == FTW_F && strstr(base, ".so") && pv_is_elf(p)) pv_push(&PV_FILES, p);
@@ -219,7 +221,7 @@ static void pv_clear(pv_list* l) { for (int k = 0; k < l->n; k++) free(l->v[k]);
 /* one scope: its names (and the prefixes of their providers) recorded, its files edited */
 static pv_list PV_ALL_ENTRIES, PV_ALL_PREFIXES;
 static int pv_scope(const char* dir) {
-    pv_clear(&PV_FILES); pv_clear(&PV_NAMES); pv_clear(&PV_PREFIX); pv_clear(&PV_ENTRIES);
+    pv_clear(&PV_FILES); pv_clear(&PV_NAMES); pv_clear(&PV_PREFIX); pv_clear(&PV_ENTRIES); pv_clear(&PV_ENTRY_PREFIX);
     if (!isdir(dir)) return 0;
     nftw(dir, pv_scan, 32, FTW_PHYS);
     int changed = 0;
@@ -227,8 +229,8 @@ static int pv_scope(const char* dir) {
     for (int k = 0; k < PV_ENTRIES.n; k++) {
         pv_push(&PV_ALL_ENTRIES, PV_ENTRIES.v[k]);
         int seen = 0;
-        for (int j = 0; j < PV_ALL_PREFIXES.n; j++) seen |= !strcmp(PV_ALL_PREFIXES.v[j], PV_PREFIX.v[k]);
-        if (!seen) pv_push(&PV_ALL_PREFIXES, PV_PREFIX.v[k]);
+        for (int j = 0; j < PV_ALL_PREFIXES.n; j++) seen |= !strcmp(PV_ALL_PREFIXES.v[j], PV_ENTRY_PREFIX.v[k]);
+        if (!seen) pv_push(&PV_ALL_PREFIXES, PV_ENTRY_PREFIX.v[k]);
     }
     return changed;
 }

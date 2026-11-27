@@ -30,6 +30,10 @@ cc -shared -fPIC -Wl,-soname,libcnlpdep.so.1 -o "$W/b/cnlptest/lib/libcnlpdep.so
 cc -std=c99 -O2 -shared -fPIC -o "$W/b/cnlptest/lib/libcnlptest.so" "$ROOT/conformance/cli/testlib.c" -lm \
     -L"$W/b/cnlptest/lib" -Wl,--no-as-needed -l:libcnlpdep.so.1 -Wl,-rpath,'$ORIGIN'
 printf 'name = cnlptest\nversion = 0.0.1\ncnlp_abi = 0.2\n' > "$W/b/cnlptest/VERSION"
+# and a part of it that only a GPU uses: an artifact of its release, for the cuda device
+G=cnlpgpu-0123456789abcdef; mkdir -p "$W/g/$G/part"; echo gpu > "$W/g/$G/part/libgpu.txt"
+tar -C "$W/g" -czf "$R/cnlptest/$G.artifact.tar.gz" "$G"
+printf '%s/part lib/gpu cuda\n' "$G" > "$W/b/cnlptest/ARTIFACTS"
 tar -C "$W/b" -czf "$R/cnlptest/cnlptest-$PLAT.tar.gz" cnlptest
 (cd "$R/cnlptest" && sha256sum -- *.tar.gz > SHA256SUMS)
 mkdir -p "$W/d/cases"; printf '5 2.0\n' > "$W/d/cases/case_small.txt"
@@ -51,7 +55,13 @@ grep -q 'CNLPLIB_PATH' "$H/.profile" && ok "it puts the library directory on CNL
 export HOME="$H" PATH="$H/.cnlplib/bin:/usr/bin:/bin" CNLPLIB_HOME="$H/.cnlplib" CNLPLIB_INDEX="file://$R/index.tsv"
 
 # ── cnlp install / list ─────────────────────────────────────────────────────────
-cnlp install cnlptest ipopt > "$W/i.log" 2>&1 && ok "cnlp install cnlptest ipopt" || bad "cnlp install: $(cat "$W/i.log")"
+CNLPLIB_DEVICE=cpu cnlp install cnlptest ipopt > "$W/i.log" 2>&1 && ok "cnlp install cnlptest ipopt" || bad "cnlp install: $(cat "$W/i.log")"
+[ ! -e "$CNLPLIB_HOME/lib/cnlptest/lib/gpu/libgpu.txt" ] && grep -q 'cuda part is not installed' "$W/i.log" \
+    && ok "a device part is left out on the host" || bad "a device part is left out on the host: $(cat "$W/i.log")"
+cnlp install --device cuda cnlptest > "$W/i2.log" 2>&1 && [ "$(cat "$CNLPLIB_HOME/lib/cnlptest/lib/gpu/libgpu.txt")" = gpu ] \
+    && [ -f "$CNLPLIB_HOME/artifacts/$G/part/libgpu.txt" ] \
+    && ok "cnlp install --device cuda adds the device part (a shared artifact's subdirectory)" || bad "cnlp install --device cuda: $(cat "$W/i2.log")"
+cnlp install --device cuda cnlptest 2>&1 | grep -q 'up to date' && ok "a second cnlp install --device cuda is a no-op" || bad "a second cnlp install --device cuda"
 [ -f "$CNLPLIB_HOME/data/cnlptestdata/case_small.txt" ] && ok "a library brings the data set it needs" || bad "the data set is installed"
 [ -f "$CNLPLIB_HOME/solvers/ipopt/lib/libcnlp_ipopt.so" ] && ok "the solver is in solvers/" || bad "the solver is in solvers/"
 cnlp list | grep -q 'cpu' && ok "cnlp list shows backends" || bad "cnlp list shows backends"

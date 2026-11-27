@@ -118,7 +118,13 @@ As for model libraries ([models.md](models.md)), with the solver's file names:
   <name>/lib/libcnlp_<name>.so   the adapter
   <name>/lib/...                 the solver and everything it loads, found through $ORIGIN
   <name>/LICENSE, THIRD_PARTY_NOTICES, VERSION
+  <name>/ARTIFACTS               optional: shared artifacts, as for model libraries
 ```
+
+A solver with a GPU build can keep the libraries only a GPU solve loads (CUDA's, say) out of
+its main download: published as artifacts of its release and listed in `ARTIFACTS` with the
+device (`cuda`), they are installed only on a machine with that device, or with `cnlp
+install --device cuda <name>`.
 
 attached to your repository's releases with a `SHA256SUMS` (a `v<version>` release, a
 rolling `nightly`, or both), with the corresponding source of any copyleft part. Then open

@@ -75,7 +75,7 @@ release's asset has a stable URL. Its single top-level directory is the bundle:
   LICENSE                 the models' license
   THIRD_PARTY_NOTICES     licenses of everything else in the bundle
   VERSION                 name, version, cnlp_abi, platform, device (key = value lines)
-  ARTIFACTS               optional: shared artifacts it needs, `ARTIFACT TARGET` per line
+  ARTIFACTS               optional: shared artifacts it needs, `ARTIFACT[/SUBDIR] TARGET [DEVICE]` per line
 ```
 
 A library can share files with other libraries through **artifacts**, listed in its
@@ -91,6 +91,15 @@ artifact is either
 - `NAME-HASH`: an archive published in the library's own release as
   `NAME-HASH.artifact.tar.gz` (holding `NAME-HASH/`), HASH being over its content, checked
   against the release's `SHA256SUMS`.
+
+A line that ends in a device (`cuda`) is a part only that device uses, such as the CUDA
+libraries a solver loads for a GPU solve. `cnlp install` installs it when the device is
+wanted: the machine has it (`nvidia-smi` lists a GPU), or `--device` names it. Otherwise it
+is left out and `cnlp install` says so; `cnlp install --device cuda NAME` adds it later.
+
+`ARTIFACT/SUBDIR` links the files of one directory of the artifact, so one artifact can
+fill several of a library's directories. An artifact is privatized as one unit (the library
+names in it get its own prefix), so libraries that load each other belong in one artifact.
 
 `scripts/package-library.sh` shares the Julia runtime as `julia-VERSION`: every file of
 `lib/julia` that is byte for byte the official Julia's is left out of the library, except
