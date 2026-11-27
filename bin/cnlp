@@ -25,7 +25,8 @@
 # A library is published per backend: the host (CPU) build, and a build with a device tier
 # (CUDA) as well. `install` takes the device build when this machine has that device
 # (nvidia-smi lists a GPU) and the host build otherwise; --device cpu|cuda, or
-# CNLPLIB_DEVICE, chooses instead.
+# CNLPLIB_DEVICE, chooses instead. A solver can keep the libraries of a device in a separate
+# download, installed the same way: only when that device is wanted.
 #
 # Environment: CNLPLIB_HOME (default ~/.cnlplib), CNLPLIB_INDEX (default the published index),
 # CNLPLIB_DEVICE (cpu or cuda; default: detected).
@@ -141,7 +142,7 @@ install_artifact() {
     _a="$1"; _ab="$2"
     _aw="$(curl -fsSL "$_ab/SHA256SUMS" 2>/dev/null | awk -v f="$_a.artifact.tar.gz" '$2 == f || $2 == "*" f { print $1 }')"
     [ -n "$_aw" ] || die "no checksum for $_a.artifact.tar.gz in $_ab/SHA256SUMS"
-    echo "Installing the shared artifact $_a"
+    echo "Installing the artifact $_a"
     mkdir -p "$ARTDIR"; _as="$(mktemp -d "$ARTDIR/.stage-$_a.XXXXXX")"
     curl -fSL --progress-bar "$_ab/$_a.artifact.tar.gz" -o "$_as/a.tar.gz" || { rm -rf "$_as"; die "download failed: $_ab/$_a.artifact.tar.gz"; }
     [ "$(sha256 "$_as/a.tar.gz")" = "$_aw" ] || { rm -rf "$_as"; die "checksum mismatch for $_a"; }
@@ -179,6 +180,42 @@ install_julia() {
     tar -xzf "$_js/j.tar.gz" -C "$_js" "julia-$_jv/lib/julia"
     mv "$_js/julia-$_jv/lib/julia" "$_jd" 2>/dev/null || [ -d "$_jd" ] || die "could not install Julia $_jv's runtime"
     rm -rf "$_js"
+}
+
+# A library's shared artifacts (its ARTIFACTS file: `ARTIFACT[/SUBDIR] TARGET [DEVICE]` lines),
+# each installed once into $ARTDIR and the files of the artifact (or of its SUBDIR) linked
+# into the library's TARGET (a file the library carries wins). A line with a DEVICE (the
+# CUDA libraries a solver loads for a GPU solve) is installed only when that device is
+# wanted: this machine has it, or --device names it. Sets LINKED to the number of files linked.
+link_artifacts() {
+    _ld="$1"; _lb="$2"; _lr="$3"; LINKED=0; _lskip=""
+    [ -f "$_ld/ARTIFACTS" ] || return 0
+    _ldev="$(devices)"
+    while read -r as t dev; do
+        [ -n "$as" ] || continue
+        a="${as%%/*}"; sub=""; [ "$a" = "$as" ] || sub="${as#*/}"
+        case "/$t/" in */../*|//*) die "the asset for $_lr links $a into '$t', outside the library" ;; esac
+        case "/$sub/" in */../*) die "the asset for $_lr names '$as', outside the artifact" ;; esac
+        if [ -n "$dev" ]; then
+            case " $(echo $_ldev) " in *" $dev "*) ;; *) _lskip="$_lskip $dev"; continue ;; esac
+        fi
+        if printf '%s' "$a" | grep -Eq '^julia-[0-9]+\.[0-9]+\.[0-9]+$'; then
+            ad="$ARTDIR/$a-$PLAT"; [ -d "$ad" ] || install_julia "${a#julia-}" "$ad"
+        elif printf '%s' "$a" | grep -Eq '^[a-z0-9_]+-[0-9a-f]{16,64}$'; then
+            ad="$ARTDIR/$a"; [ -d "$ad" ] || install_artifact "$a" "$_lb"
+        else
+            die "the asset for $_lr names an invalid artifact '$a'"
+        fi
+        [ -z "$sub" ] || ad="$ad/$sub"
+        [ -d "$ad" ] || die "the artifact $a has no $sub/"
+        mkdir -p "$_ld/$t"
+        for f in $(ls -A "$ad"); do
+            [ -e "$_ld/$t/$f" ] || [ -L "$_ld/$t/$f" ] || { ln -s "$ad/$f" "$_ld/$t/$f"; LINKED=$((LINKED + 1)); }
+        done
+    done < "$_ld/ARTIFACTS"
+    for dev in $(printf '%s\n' $_lskip | sort -u); do
+        echo "($_lr: its $dev part is not installed; cnlp install --device $dev ${_lr%%@*} adds it)"
+    done
 }
 
 install_one() {
@@ -222,6 +259,9 @@ install_one() {
     if [ "$(printf '%s' "$cur" | cut -d' ' -f2)" = "$want" ]; then
         # same bytes: record the request, so `up` follows the channel asked for last
         f="$dest/$n/.cnlplib-version"; echo "${cur%% *} $want $req" > "$f"
+        # a device part not installed before (cnlp install --device cuda, on a CPU install)
+        link_artifacts "$dest/$n" "${url%/*}" "$req"
+        [ "$LINKED" -eq 0 ] || privatize
         echo "$req is up to date"; return
     fi
     echo "Installing $req ($build)"
@@ -239,25 +279,7 @@ install_one() {
         lib) ls "$src/lib/lib$n".* >/dev/null 2>&1 || die "the asset for $req has no lib/lib$n.<ext>" ;;
         solver) ls "$src/lib/libcnlp_$n".* >/dev/null 2>&1 || die "the asset for $req has no lib/libcnlp_$n.<ext>" ;;
     esac
-    # shared artifacts (ARTIFACTS: `ARTIFACT TARGET` lines), each installed once into
-    # $ARTDIR and its files linked into the library's TARGET (a file the library carries wins)
-    if [ -f "$src/ARTIFACTS" ]; then
-        while read -r a t; do
-            [ -n "$a" ] || continue
-            case "/$t/" in */../*|//*) die "the asset for $req links $a into '$t', outside the library" ;; esac
-            if printf '%s' "$a" | grep -Eq '^julia-[0-9]+\.[0-9]+\.[0-9]+$'; then
-                ad="$ARTDIR/$a-$PLAT"; [ -d "$ad" ] || install_julia "${a#julia-}" "$ad"
-            elif printf '%s' "$a" | grep -Eq '^[a-z0-9_]+-[0-9a-f]{16,64}$'; then
-                ad="$ARTDIR/$a"; [ -d "$ad" ] || install_artifact "$a" "${url%/*}"
-            else
-                die "the asset for $req names an invalid artifact '$a'"
-            fi
-            mkdir -p "$src/$t"
-            for f in $(ls -A "$ad"); do
-                [ -e "$src/$t/$f" ] || [ -L "$src/$t/$f" ] || ln -s "$ad/$f" "$src/$t/$f"
-            done
-        done < "$src/ARTIFACTS"
-    fi
+    link_artifacts "$src" "${url%/*}" "$req"
     # the version the asset says it is, if it says
     v="$(sed -n 's/^version *= *//p' "$src/VERSION" 2>/dev/null | head -n 1)"; [ -n "$v" ] && ver="$v"
     echo "$ver $want $req" > "$src/.cnlplib-version"
