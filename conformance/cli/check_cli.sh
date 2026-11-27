@@ -132,6 +132,25 @@ except ValueError as e:
     assert "does not run there" in str(e), e
 ' > "$W/py.log" 2>&1 && ok "Python: cnlplib.solve with an installed solver, loaded once, in-process" || bad "cnlplib.solve: $(cat "$W/py.log")"
 
+# ── cnlp hsl: a user's own HSL beside a solver (a stand-in libhsl, in HSL_jll's layout) ──
+case "$(uname -m)" in x86_64) T=x86_64-linux-gnu-libgfortran5 ;; *) T=aarch64-linux-gnu-libgfortran5 ;; esac
+mkdir -p "$W/HSL_jll/override/lib/$T"
+printf 'int LIBHSL_isfunctional(void) { return 1; }\n' > "$W/hsl.c"
+cc -shared -fPIC -Wl,-soname,libhsl.so -o "$W/HSL_jll/override/lib/$T/libhsl.so" "$W/hsl.c"
+cp "$W/HSL_jll/override/lib/$T/libhsl.so" "$W/HSL_jll/override/lib/$T/libhsl_subset.so"
+# a solver with a Julia runtime (lib/julia, where HSL goes), put there by hand
+mkdir -p "$CNLPLIB_HOME/solvers/jsolver/lib/julia"; J=$CNLPLIB_HOME/solvers/jsolver/lib/julia
+cnlp hsl add "$W/HSL_jll" --solver jsolver > "$W/h.log" 2>&1 && [ -f "$J/libhsl.so" ] \
+    && [ -f "$J/libhsl_subset.so" ] && cnlp hsl | grep -q '^jsolver: ' \
+    && ok "cnlp hsl add: the platform's libhsl* beside the solver" || bad "cnlp hsl add: $(cat "$W/h.log")"
+tar -C "$W" -czf "$W/HSL_jll.tar.gz" HSL_jll && cnlp hsl add "$W/HSL_jll.tar.gz" --solver jsolver > /dev/null 2>&1 \
+    && ok "cnlp hsl add from a tarball" || bad "cnlp hsl add from a tarball"
+cnlp hsl remove --solver jsolver > /dev/null && [ ! -e "$J/libhsl.so" ] \
+    && ok "cnlp hsl remove" || bad "cnlp hsl remove"
+rm -rf "$CNLPLIB_HOME/solvers/jsolver"
+cnlp hsl add "$W/HSL_jll" --solver ipopt > /dev/null 2>&1 && bad "cnlp hsl add for a solver without lib/julia" || ok "cnlp hsl add needs the solver's lib/julia"
+cnlp hsl add "$W/HSL_jll" --solver nosuch > /dev/null 2>&1 && bad "cnlp hsl add for a solver not installed" || ok "cnlp hsl add needs the solver"
+
 # ── cnlp config ─────────────────────────────────────────────────────────────────
 cnlp config set artifacts.hsl /opt/hsl/lib && cnlp config set artifacts.cuda-12.9 '/a "b"' \
     && [ "$(cnlp config get artifacts.hsl)" = /opt/hsl/lib ] && [ "$(cnlp config get artifacts.cuda-12.9)" = '/a "b"' ] \
