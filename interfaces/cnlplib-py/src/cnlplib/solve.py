@@ -153,7 +153,7 @@ class Solver:
         if on_device and self._solve_d is None:
             raise ValueError(
                 f"the model is on the GPU (backend='cuda') and {self.name} does not "
-                "run there: use a GPU solver (cumadnlp), or a model on the host"
+                "run there: use a solver with a GPU entry point (madnlp), or a model on the host"
             )
         n, m = model.nvar, model.ncon
         x0 = np.ascontiguousarray(model.x0 if x0 is None else _host(x0), dtype=np.float64)
@@ -237,7 +237,7 @@ def solve(model: CModel, solver: str = "ipopt", x0: Any = None, **options: Any) 
     model lives (its `backend`); the solver is loaded on first use and kept. See `Solver.solve`.
 
         m = cnlplib.CModel("@emp", "acp", "pglib_opf_case118_ieee", backend="cuda")
-        r = cnlplib.solve(m, solver="cumadnlp")
+        r = cnlplib.solve(m, solver="madnlp")
     """
     if sys.maxsize <= 2**32:
         raise RuntimeError("cnlplib.solve needs a 64-bit platform")

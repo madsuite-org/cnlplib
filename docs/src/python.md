@@ -57,9 +57,9 @@ updates them for every later evaluation.
 store (`cnlp install madnlp`, `cnlp install ipopt`), in this process: the solver is loaded on
 first use and kept, so its start-up is paid once, and it calls the model library's functions
 directly, with no Python in between. The solve runs where the model lives: a model created
-with `backend="cuda"` is solved on the GPU, through the library's CUDA tier, by a GPU solver
-(`solver="cumadnlp"`). It returns the status, objective, iterations, solution and multipliers
-(CuPy arrays for a GPU model).
+with `backend="cuda"` is solved on the GPU, through the library's CUDA tier, by a solver
+with a GPU entry point (`solver="madnlp"`). It returns the status, objective, iterations,
+solution and multipliers (CuPy arrays for a GPU model).
 
 `m.write_solution(path, r)` writes a result as a [cnlp-solution](../../formats/solution.md)
 file (through libcnlpio, the library the `cnlp` command installs and Julia uses too), or
