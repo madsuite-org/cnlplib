@@ -141,6 +141,30 @@ free for academic use), or the library of Julia's HSL_jll package.
 time, and exits with 0 when the status is `solved` or `acceptable`, 1 otherwise, and 2 for an
 error before the solve.
 
+## Settings
+
+Local settings live in `$CNLPLIB_HOME/config.toml`, a TOML file of sections with string
+values, kept with `cnlp config`:
+
+```sh
+cnlp config set artifacts.hsl /opt/hsl/lib     # where the user's own HSL is
+cnlp config get artifacts.hsl
+cnlp config list
+cnlp config unset artifacts.hsl
+```
+
+A key is `SECTION.NAME`. The `[artifacts]` section says where an artifact is, in place of
+the store's copy: `hsl`, the HSL libraries a user brings (cnlp never downloads them), or a
+CUDA toolkit already installed on the machine. A solver reads it when it first needs the
+artifact; an option or environment variable that names the same thing takes precedence.
+`cnlp config set` rewrites the file, so comments added by hand are not kept.
+
+```toml
+[artifacts]
+hsl = "/opt/hsl/lib"
+"cuda-12.9" = "/usr/local/cuda/lib64"
+```
+
 ## Environment
 
 | variable | default | meaning |

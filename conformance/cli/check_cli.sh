@@ -124,6 +124,16 @@ except ValueError as e:
     assert "does not run there" in str(e), e
 ' > "$W/py.log" 2>&1 && ok "Python: cnlplib.solve with an installed solver, loaded once, in-process" || bad "cnlplib.solve: $(cat "$W/py.log")"
 
+# ── cnlp config ─────────────────────────────────────────────────────────────────
+cnlp config set artifacts.hsl /opt/hsl/lib && cnlp config set artifacts.cuda-12.9 '/a "b"' \
+    && [ "$(cnlp config get artifacts.hsl)" = /opt/hsl/lib ] && [ "$(cnlp config get artifacts.cuda-12.9)" = '/a "b"' ] \
+    && ok "cnlp config set/get" || bad "cnlp config set/get: $(cat "$CNLPLIB_HOME/config.toml" 2>&1)"
+"$PY" -c "import sys, tomllib; c = tomllib.load(open(sys.argv[1], 'rb')); assert c['artifacts'] == {'hsl': '/opt/hsl/lib', 'cuda-12.9': '/a \"b\"'}, c" \
+    "$CNLPLIB_HOME/config.toml" && ok "config.toml is TOML" || bad "config.toml: $(cat "$CNLPLIB_HOME/config.toml")"
+cnlp config unset artifacts.hsl && ! cnlp config get artifacts.hsl > /dev/null 2>&1 && cnlp config list | grep -q '^artifacts.cuda-12.9 = ' \
+    && ok "cnlp config unset/list" || bad "cnlp config unset/list: $(cnlp config list 2>&1)"
+cnlp config get hsl > /dev/null 2>&1 && bad "a key without a section was accepted" || ok "a config key is SECTION.NAME"
+
 # ── cnlp up / remove ────────────────────────────────────────────────────────────
 cnlp up > "$W/u.log" 2>&1 && ok "cnlp up" || bad "cnlp up: $(cat "$W/u.log")"
 mkdir -p "$CNLPLIB_HOME/solvers/byhand/lib"     # a solver put there by hand: no release record
