@@ -107,6 +107,7 @@ makedocs(
         "Python" => "python.md",
         "Publishing models" => "models.md",
         "Adding solvers" => "solvers.md",
+        "Without cnlp" => "standalone.md",
         "Formats" => [
             "Overview" => "formats/README.md",
             "Input" => "formats/input.md",
