@@ -138,13 +138,17 @@ mkdir -p "$W/HSL_jll/override/lib/$T"
 printf 'int LIBHSL_isfunctional(void) { return 1; }\n' > "$W/hsl.c"
 cc -shared -fPIC -Wl,-soname,libhsl.so -o "$W/HSL_jll/override/lib/$T/libhsl.so" "$W/hsl.c"
 cp "$W/HSL_jll/override/lib/$T/libhsl.so" "$W/HSL_jll/override/lib/$T/libhsl_subset.so"
-cnlp hsl add "$W/HSL_jll" --solver ipopt > "$W/h.log" 2>&1 && [ -f "$CNLPLIB_HOME/solvers/ipopt/lib/julia/libhsl.so" ] \
-    && [ -f "$CNLPLIB_HOME/solvers/ipopt/lib/julia/libhsl_subset.so" ] && cnlp hsl | grep -q '^ipopt: ' \
+# a solver with a Julia runtime (lib/julia, where HSL goes), put there by hand
+mkdir -p "$CNLPLIB_HOME/solvers/jsolver/lib/julia"; J=$CNLPLIB_HOME/solvers/jsolver/lib/julia
+cnlp hsl add "$W/HSL_jll" --solver jsolver > "$W/h.log" 2>&1 && [ -f "$J/libhsl.so" ] \
+    && [ -f "$J/libhsl_subset.so" ] && cnlp hsl | grep -q '^jsolver: ' \
     && ok "cnlp hsl add: the platform's libhsl* beside the solver" || bad "cnlp hsl add: $(cat "$W/h.log")"
-tar -C "$W" -czf "$W/HSL_jll.tar.gz" HSL_jll && cnlp hsl add "$W/HSL_jll.tar.gz" --solver ipopt > /dev/null 2>&1 \
+tar -C "$W" -czf "$W/HSL_jll.tar.gz" HSL_jll && cnlp hsl add "$W/HSL_jll.tar.gz" --solver jsolver > /dev/null 2>&1 \
     && ok "cnlp hsl add from a tarball" || bad "cnlp hsl add from a tarball"
-cnlp hsl remove --solver ipopt > /dev/null && [ ! -e "$CNLPLIB_HOME/solvers/ipopt/lib/julia/libhsl.so" ] \
+cnlp hsl remove --solver jsolver > /dev/null && [ ! -e "$J/libhsl.so" ] \
     && ok "cnlp hsl remove" || bad "cnlp hsl remove"
+rm -rf "$CNLPLIB_HOME/solvers/jsolver"
+cnlp hsl add "$W/HSL_jll" --solver ipopt > /dev/null 2>&1 && bad "cnlp hsl add for a solver without lib/julia" || ok "cnlp hsl add needs the solver's lib/julia"
 cnlp hsl add "$W/HSL_jll" --solver nosuch > /dev/null 2>&1 && bad "cnlp hsl add for a solver not installed" || ok "cnlp hsl add needs the solver"
 
 # ── cnlp config ─────────────────────────────────────────────────────────────────
